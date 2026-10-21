@@ -102,7 +102,8 @@ function colorOf(value: string | undefined, current: string | undefined): Rgb | 
 
 /** A path's `d` as subpaths of points, arcs flattened every `step` units. M L H V A Z, absolute or relative. */
 export function pathPoints(d: string, step: number): { points: Point[]; closed: boolean }[] {
-  const tokens = d.match(/[MmLlHhVvAaZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []
+  // Every command letter is a token, so one this subset does not draw stops the path instead of passing for a line.
+  const tokens = d.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []
   const out: { points: Point[]; closed: boolean }[] = []
   let current: Point[] = []
   let x = 0

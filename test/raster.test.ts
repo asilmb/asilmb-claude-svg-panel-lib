@@ -187,6 +187,8 @@ test('paths: lines, closes and arcs, the SVG way', () => {
   assert.equal(box[0]!.closed, true)
   assert.deepEqual(box[0]!.points, [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }])
   assert.deepEqual(pathPoints('m1 1l2 0', 1)[0]!.points, [{ x: 1, y: 1 }, { x: 3, y: 1 }])
+  // A curve is not drawn: the path stops there, rather than running a line through its control points.
+  assert.deepEqual(pathPoints('M10 70L20 70C50 0 110 0 150 70', 1), [{ points: [{ x: 10, y: 70 }, { x: 20, y: 70 }], closed: false }])
   // A half circle clockwise from the left to the right of (10, 10) passes over the top.
   const top = arcPoints(0, 10, 10, 10, 0, false, true, 20, 10, 0.5)
   const mid = top[Math.floor(top.length / 2)]!

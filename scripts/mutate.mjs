@@ -42,6 +42,7 @@ const MUTANTS = [
   ['raster encoding', 'src/raster.ts', 'bytes[o] = word & 255', 'bytes[o] = (word >>> 24) & 255'],
   ['raster hidden css', 'src/readSvg.ts', 'if (m) out.add(m[1]!)', 'if (m) out.add(`.${m[1]!}`)'],
   ['raster arc sweep', 'src/readSvg.ts', 'if (sweep && delta < 0) delta += 2 * Math.PI', 'if (sweep && delta < 0) delta -= 0'],
+  ['raster unknown command', 'src/readSvg.ts', "d.match(/[A-Za-z]|", "d.match(/[MmLlHhVvAaZz]|"],
   ['raster hairline', 'src/readSvg.ts', 'export const MIN_STROKE = 1', 'export const MIN_STROKE = 0.25'],
   ['raster rect snap', 'src/readSvg.ts', 'const y = Math.round(Y(number(attrs.y)))', 'const y = Y(number(attrs.y))'],
   ['raster soft edge', 'src/dots.ts', 'return clamp(0.5 - sd, 0, 1)', 'return sd < 0 ? 1 : 0'],

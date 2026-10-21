@@ -385,7 +385,7 @@ Each component's test checks four things for a known input:
 takes, the braille dot order, where a gauge's figures land, the hidden tooltips, hairlines, a tile's nested body, arcs,
 and the size limits.
 
-`npm run mutate` applies 36 deliberate breakages, one at a time, and every one turns a test red.
+`npm run mutate` applies 37 deliberate breakages, one at a time, and every one turns a test red.
 
 ## Platform facts
 
