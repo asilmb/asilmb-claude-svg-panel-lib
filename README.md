@@ -24,8 +24,10 @@ A hooks module imports only its own files and `'claude-code'` (see [platform fac
 folder you copy into your mod:
 
 ```sh
-cp -r path/to/svg-panel/src  my-mod/vendor/svg-panel
+cp -r path/to/svg-panel/examples/demo-mod/vendor/svg-panel  my-mod/vendor/svg-panel
 ```
+
+That folder is `src/` plus the `LICENSE`, which the MIT license asks to keep with every copy.
 
 Your mod's `tsconfig.json` needs `"allowImportingTsExtensions": true`, because the library's files import each other
 with their `.ts` names. `examples/demo-mod/tsconfig.json` is a complete one.
@@ -373,4 +375,4 @@ between releases, so re-check these facts against your own build's types.
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).

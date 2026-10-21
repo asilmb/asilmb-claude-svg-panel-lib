@@ -8,7 +8,7 @@
     ".": "./src/index.ts",
     "./dist": "./dist/svg-panel.js"
   },
-  "files": ["src", "dist"],
+  "files": ["src", "dist", "LICENSE"],
   "engines": { "node": ">=22.18" },
   "scripts": {
     "typecheck": "tsc -p . && tsc -p examples/demo-mod/tsconfig.json",

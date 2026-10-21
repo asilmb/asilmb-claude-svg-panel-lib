@@ -1,10 +1,10 @@
 // Builds what is generated from src/, with no packages:
-//   examples/demo-mod/vendor/svg-panel/  a copy of src/ a mod imports
-//   dist/svg-panel.js                    one ES module, types stripped
+//   examples/demo-mod/vendor/svg-panel/  a copy of src/ a mod imports, with the LICENSE
+//   dist/svg-panel.js                    one ES module, types stripped, with the LICENSE beside it
 //   demo/index.html                      demo/page.html with the library and the scene inlined
 // Run it after changing src/ or the demo's scene; `npm run check` does.
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
@@ -23,6 +23,8 @@ for (const file of files) {
   const header = `// Copied from svg-panel's src/${file} by scripts/build.mjs: edit src/, then rebuild.\n\n`
   writeFileSync(vendor + file, header + readFileSync(src + file, 'utf8'))
 }
+// MIT asks that the notice travel with every copy; a mod copies this folder.
+copyFileSync(`${root}LICENSE`, `${vendor}LICENSE`)
 
 // 2. One module: each file's types stripped and its imports dropped, in
 // dependency order, so the files' top-level names share one scope.
@@ -50,6 +52,7 @@ const modules = order.map(file => `// ---- src/${file}\n${strip(readFileSync(src
 const banner = '// svg-panel, built from src/ by scripts/build.mjs. Do not edit.\n'
 mkdirSync(`${root}dist`, { recursive: true })
 writeFileSync(`${root}dist/svg-panel.js`, `${banner}\n${modules.join('\n\n')}\n`)
+copyFileSync(`${root}LICENSE`, `${root}dist/LICENSE`)
 
 // 3. The demo page: the library and the scene as one classic script, no
 // imports, so it opens from a double click (file:// loads no modules).
