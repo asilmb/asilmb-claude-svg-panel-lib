@@ -37,8 +37,8 @@ test('the apps draw every picture as an Svg with its alt', async $ => {
   for (const surface of APPS) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const pictures = await ui.findAll({ type: 'Svg' })
-    // two gauges, four tiles, the chart, three meters, a sparkline, six hosts, the legend, seven icons
-    expect(pictures).toHaveLength(25)
+    // two gauges, four tiles, the chart, the four by host, three meters, a sparkline, six hosts, the legend, seven icons
+    expect(pictures).toHaveLength(29)
     for (const found of pictures) {
       expect(String(found.props.source)).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)
       expect(String(found.props.alt).length).toBeGreaterThan(0)
@@ -46,6 +46,8 @@ test('the apps draw every picture as an Svg with its alt', async $ => {
     expect(await svg(ui, /^Throughput: 1182 of 2000, ok; threshold 1600$/)).toBeDefined()
     expect(await svg(ui, /^Latency p95: 158 ms of 600 ms, ok; threshold 300 ms$/)).toBeDefined()
     expect((await svg(ui, /^requests\/s over 40 steps/))?.props.isInteractive).toBe(true)
+    expect(await svg(ui, /^Hosts: 6 items, 4 ok, 1 warning, 1 serious; serious: batch$/)).toBeDefined()
+    expect(await svg(ui, /^Traffic share: total 1182; /)).toBeDefined()
     await ui.unmount()
   }
 })
@@ -54,9 +56,10 @@ test('the terminal draws the pictures as Rasters, with their labels in letters',
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
   const rasters = await ui.findAll({ type: 'Raster' })
-  // two gauges, the chart, four tiles, three meters, a sparkline
+  // two gauges, the chart, the four by host, four tiles, three meters, a sparkline
   expect(rasters.map(r => r.props.key)).toEqual([
-    'throughput', 'latency', 'requests', 'tile-0', 'tile-1', 'tile-2', 'tile-3', 'meter-0', 'meter-1', 'meter-2', 'latency-trend',
+    'throughput', 'latency', 'requests', 'host-load', 'traffic-share', 'host-heat', 'host-grid',
+    'tile-0', 'tile-1', 'tile-2', 'tile-3', 'meter-0', 'meter-1', 'meter-2', 'latency-trend',
   ])
   for (const r of rasters) {
     const { cells, columns, rows } = r.props as { cells: string; columns: number; rows: number }
@@ -73,6 +76,8 @@ test('the terminal draws the pictures as Rasters, with their labels in letters',
   expect(chart).not.toContain('#1 ·')
   expect(await rasterText(ui, 'tile-1')).toMatch(/Hosts[\s\S]*4\/6/)
   expect(await rasterText(ui, 'meter-1')).toContain('74% / 100% · warning')
+  for (const host of ['web-1', 'api-1', 'batch']) expect(await rasterText(ui, 'host-grid')).toContain(host)
+  expect(await rasterText(ui, 'traffic-share')).toContain('1182')
   expect(await ui.find({ type: 'Text', text: '● online  ◐ idle  ○ offline  ▲ rising  ▼ falling  ⚑ alert  ✕ failed' })).toBeDefined()
   await ui.unmount()
 })

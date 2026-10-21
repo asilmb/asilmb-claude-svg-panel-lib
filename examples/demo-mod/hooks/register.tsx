@@ -80,6 +80,11 @@ export const register: Register = on => {
           </Box>
           <Raster key={cells.requests.key} columns={cells.requests.columns} rows={cells.requests.rows} cells={cells.requests.cells} />
           <Box flexDirection="row" flexWrap="wrap" gap="sm">
+            {cells.breakdown.map(r => (
+              <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
+            ))}
+          </Box>
+          <Box flexDirection="row" flexWrap="wrap" gap="sm">
             {cells.tiles.map(r => (
               <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
             ))}
@@ -129,6 +134,11 @@ export const register: Register = on => {
           ))}
         </Box>
         <Svg source={scene.requests.svg} alt={scene.requests.alt} isInteractive={scene.requests.isInteractive} />
+        <Box flexDirection="row" flexWrap="wrap" gap="md">
+          {scene.breakdown.map(p => (
+            <Svg source={p.svg} alt={p.alt} />
+          ))}
+        </Box>
         <Box flexDirection="row" flexWrap="wrap" gap="sm">
           <Button key="sample" variant="primary" onPress={sample}>+ sample</Button>
           <Button key="deploy" onPress={press({ event: 'marker', kind: 'deploy' })}>deploy</Button>

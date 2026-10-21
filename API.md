@@ -241,6 +241,89 @@ Swatches with labels, wrapping at `width` (default `240`). The twin is `─ requ
 `legendMarkup(items, x, y, maxWidth, theme)` to draw one inside another picture, and `legendTwin(items)` for the line
 of text alone.
 
+### bars
+
+```ts
+bars(items: readonly BarItem[], options?: BarsOptions): Picture
+type BarItem = { label: string; value: number; status?: Status }
+```
+
+Columns over a baseline, 240 × 140 (30 × 9 cells). Each column's figure sits over it and its label under it, where they
+fit the column's slot; the alt and the twin keep every one.
+
+| `BarsOptions` | Default | |
+| --- | --- | --- |
+| `width`, `height` | `240`, `140` | |
+| `threshold` | none | a dashed rule; a column at or past it is `warning` unless its item has a `status` |
+| `max` | a tidy figure over the data and the threshold | the scale's top |
+| `label` | `'Bars'` | for the alt and the twin |
+| `theme`, `format`, `background` | | |
+
+The twin is `Deploys ▄▆▃▇▅▆▂ high thu 88`. `barLayout(count, width, height, top)` gives each column's place.
+
+### donut
+
+```ts
+donut(slices: readonly Slice[], options?: DonutOptions): Picture
+type Slice = { label: string; value: number; color?: string }
+```
+
+A ring of shares with the total in its middle and the shares listed beside it, 232 × 144 (29 × 9 cells). Values at or
+under zero are left out. With nothing left the ring is an empty track.
+
+| `DonutOptions` | Default | |
+| --- | --- | --- |
+| `center` | the total | the figure in the middle |
+| `maxSlices` | `5` | past it the smallest shares fold into `other` |
+| `legend` | `true` | the list of shares beside the ring |
+| `label` | `'Shares'` | for the alt and the twin |
+| `theme`, `format`, `background` | | |
+
+The twin is `Traffic 12.4k: api 46% · web 31% · batch 23%`. `donutShares(slices, max, theme)` gives the shares as drawn,
+with their colours.
+
+### heatmap
+
+```ts
+heatmap(data: HeatmapData, options?: HeatmapOptions): Picture
+type HeatmapData = { values: readonly (readonly (number | null | undefined)[])[]; rowLabels?: readonly string[]; colLabels?: readonly string[] }
+```
+
+Rows of cells in `HEAT_STEPS` (5) steps of one colour. A value that is not a finite number is missing and drawn as a
+short dash. Column labels are shown every so many columns, so none runs into the next. The grid starts on a terminal
+cell's corner (8 × 16 CSS pixels) and a cell with its gap is 16 pixels, two terminal columns.
+
+| `HeatmapOptions` | Default | |
+| --- | --- | --- |
+| `cell`, `gap` | `14`, `2` | a cell's side and the space between cells |
+| `min`, `max` | the data's | the scale's ends |
+| `color` | the theme's blue | the top step; the lower ones mix toward the grid colour (`heatColors`) |
+| `key` | `true` | the `less ■■■■■ more` key under the grid |
+| `label` | `'Heatmap'` | for the alt |
+| `theme`, `format`, `background` | | |
+
+The twin is a line a row, one shade a cell from `HEAT_SHADES` (` ·░▒▓█`, a space for missing), the row's label in front.
+`heatStep(value, lo, hi)` gives a value's step.
+
+### statusGrid
+
+```ts
+statusGrid(items: readonly StatusItem[], options?: StatusGridOptions): Picture
+type StatusItem = { label: string; status: Status; value?: string }
+```
+
+Tiles of 84 × 44, six to a row by default: a dot in the status colour, the name, and the `value` or the status's word
+under it. A name too long for its tile is cut with `…` (`fitLabel`).
+
+| `StatusGridOptions` | Default | |
+| --- | --- | --- |
+| `columns` | as many as fit `width`, 6 at most | tiles a row |
+| `tile`, `gap` | `{ width: 84, height: 44 }`, `6` | |
+| `label` | `'Status'` | for the alt |
+| `theme`, `background` | | |
+
+The twin is `● web-1  ▲ api-1  ✕ batch`: each status has a shape as well as a colour (`STATUS_GLYPH`).
+
 ## Terminal: Raster cells
 
 The terminal has no `Svg`. These functions turn a picture, or any `<svg>` string, into the cells of a `Raster`. They paint
@@ -268,8 +351,8 @@ takes: padded base64 of little-endian u32 triplets `[codePoint, foreground, back
 | `theme` | `'dark'` | its surface is what the picture's soft edges mix with |
 | `backdrop` | the theme's surface | that colour as a hex |
 
-Sizes at the default scale, in cells: gauge 29 × 11, meter 30 × 3, sparkline 15 × 2, timeline 60 × 10, a bare tile
-25 × 4, an icon 3 × 2. A Raster is at most 512 × 256 (`RASTER_MAX`), so a taller picture is scaled down to fit.
+Sizes at the default scale, in cells: gauge 29 × 11, meter 30 × 3, sparkline 15 × 2, timeline 60 × 10, bars 30 × 9,
+donut 29 × 9, a bare tile 25 × 4, an icon 3 × 2. A Raster is at most 512 × 256 (`RASTER_MAX`), so a taller picture is scaled down to fit.
 
 What the mod decides around it:
 
@@ -323,20 +406,26 @@ The functions `toRaster` is built from are exported for a mod that wants to draw
 | `BRAILLE_INK` | How much of its square a braille dot is taken to ink (`0.5`). |
 | `cellChars`, `packRgb`, `hexRgb` | Characters and colours for cells. |
 | `dots(width, height)` and its painters | The canvas: `fillCircle`, `strokeCircle`, `fillRoundRect`, `strokeRoundRect`, `fillPolygon`, `strokePolyline`, `dash`. |
-| `pathPoints`, `arcPoints`, `snapLine`, `hiddenClasses`, `MIN_STROKE` | Path flattening, hairline snapping, CSS hiding, and the thinnest stroke (1 dot). |
+| `pathPoints`, `arcPoints`, `snapLine`, `hiddenClasses`, `gradientColors`, `MIN_STROKE` | Path flattening, hairline snapping, CSS hiding, gradients' mean colours, and the thinnest stroke (1 dot). |
 
 `readSvg` reads the subset of SVG that these components write, which is enough for most hand-written pictures too:
 
 - **Elements.** `svg` (nested, with `x`, `y`, `width`, `height` and `viewBox`), `g`, `rect` (with `rx`), `circle`,
-  `line`, `polyline`, `polygon`, `path` and `text`.
-- **Paths.** The `M L H V A Z` commands, absolute or relative.
+  `ellipse`, `line`, `polyline`, `polygon`, `path` and `text`.
+- **Paths.** The `M L H V C S Q T A Z` commands, absolute or relative: lines, cubic and quadratic curves (with the
+  mirrored control point of `S` and `T`) and arcs.
+- **Gradients.** A fill or stroke of `url(#id)` naming a `linearGradient` or `radialGradient` paints in the gradient's
+  mean colour, since a cell holds two colours. Stops come from `<stop>`s (`stop-color` as an attribute or in `style`), or
+  from the gradient its `href` names.
+- **Definitions.** What `<defs>`, `<clipPath>`, `<mask>`, `<pattern>`, `<marker>`, `<symbol>` and `<filter>` hold is not
+  painted where it stands.
 - **Paint.** `fill`, `stroke`, `stroke-width`, `stroke-linecap`, `stroke-dasharray`, `paint-order`, `fill-opacity`,
   `stroke-opacity` and `currentColor`, inherited from groups as SVG inherits them, and `opacity` on a shape.
 - **Transforms.** `translate()` and `scale()`.
 - **CSS.** A class hidden by `<style>` (`.a{visibility:hidden}`) stays hidden.
 
-It skips curves (a path stops at `C`, `Q`, `S` or `T`), ellipses, gradients, clip paths, filters, `opacity` on a group
-and other transforms.
+It skips clipping and masks (what they would cut is drawn whole), filters, `<use>`, images, `opacity` on a group and
+other transforms. A path stops at a command outside the list above.
 
 ## Twins
 

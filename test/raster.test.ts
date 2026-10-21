@@ -13,6 +13,7 @@ import {
   encodeCells,
   fitCell,
   gauge,
+  gradientColors,
   gridText,
   hexRgb,
   hiddenClasses,
@@ -187,8 +188,19 @@ test('paths: lines, closes and arcs, the SVG way', () => {
   assert.equal(box[0]!.closed, true)
   assert.deepEqual(box[0]!.points, [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }])
   assert.deepEqual(pathPoints('m1 1l2 0', 1)[0]!.points, [{ x: 1, y: 1 }, { x: 3, y: 1 }])
-  // A curve is not drawn: the path stops there, rather than running a line through its control points.
-  assert.deepEqual(pathPoints('M10 70L20 70C50 0 110 0 150 70', 1), [{ points: [{ x: 10, y: 70 }, { x: 20, y: 70 }], closed: false }])
+  // A cubic passes through its own middle, not its control points: B(½) of (10,70) (50,0) (110,0) (150,70) is (80, 17.5).
+  const curve = pathPoints('M10 70C50 0 110 0 150 70', 1)[0]!.points
+  const middle = curve.reduce((a, b) => (Math.abs(b.x - 80) < Math.abs(a.x - 80) ? b : a))
+  near(middle.y, 17.5, 'the curve at its middle', 0.5)
+  assert.deepEqual(curve[curve.length - 1], { x: 150, y: 70 })
+  // S mirrors the last control point; Q and T draw the same way as their cubic.
+  const s = pathPoints('M0 50C0 0 50 0 50 50S100 100 100 50', 1)[0]!.points
+  near(Math.max(...s.map(p => p.y)), 87.5, 'the mirrored half dips as far as the first rose', 0.5)
+  const q = pathPoints('M0 50Q50 0 100 50T200 50', 1)[0]!.points
+  near(Math.min(...q.map(p => p.y)), 25, 'Q peaks half way to its control', 0.5)
+  near(Math.max(...q.map(p => p.y)), 75, 'T mirrors it below', 0.5)
+  // A command the subset does not know stops the path where it stands.
+  assert.deepEqual(pathPoints('M10 70L20 70R1 2', 1), [{ points: [{ x: 10, y: 70 }, { x: 20, y: 70 }], closed: false }])
   // A half circle clockwise from the left to the right of (10, 10) passes over the top.
   const top = arcPoints(0, 10, 10, 10, 0, false, true, 20, 10, 0.5)
   const mid = top[Math.floor(top.length / 2)]!
@@ -201,6 +213,30 @@ test('paths: lines, closes and arcs, the SVG way', () => {
   // The gauge's 240° track takes the large arc.
   const track = pathPoints('M53.65 132A72 72 0 1 1 178.35 132', 1)[0]!.points
   near(Math.min(...track.map(p => p.y)), 24, 'reaches the top', 0.1)
+})
+
+test('an ellipse fills its own box, a gradient paints its mean colour, and defs paint nothing', () => {
+  const green = '#00ff00'
+  const svg = svgDoc({
+    width: 80, height: 32,
+    body: '<defs><linearGradient id="g"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient>' +
+      `<rect id="unused" width="80" height="32" fill="${green}"/></defs>` +
+      '<ellipse cx="20" cy="16" rx="12" ry="8" fill="#ffffff"/><rect x="44" y="0" width="36" height="32" fill="url(#g)"/>',
+  })
+  const g = rasterGrid(svg, { backdrop: '#000000' })
+  assert.deepEqual([g.columns, g.rows], [10, 2])
+  const cell = (r: number, c: number) => g.cells[r * g.columns + c]!
+  // The ellipse's middle inks its lower half near white (its curved top edge blends a little), its sides are bare.
+  assert.equal(String.fromCodePoint(cell(0, 2).ch), '▄')
+  assert.ok([16, 8, 0].every(k => ((cell(0, 2).fg >> k) & 255) > 0xe0), 'white in the middle')
+  assert.equal(cell(0, 0).ch, 0x20)
+  assert.equal(cell(0, 0).bg, DEFAULT_COLOR)
+  // Red to blue averages to purple.
+  assert.equal(cell(0, 8).bg, 0x800080)
+  // The green rect inside <defs> is a definition: nothing green anywhere.
+  assert.ok(g.cells.every(c => c.fg !== 0x00ff00 && c.bg !== 0x00ff00), 'defs are not drawn')
+  assert.deepEqual([...gradientColors('<linearGradient id="a"><stop offset="50%" style="stop-color:#ffffff"/></linearGradient><linearGradient id="b" href="#a"/>')],
+    [['a', [255, 255, 255]], ['b', [255, 255, 255]]])
 })
 
 test('readSvg sizes the canvas in whole cells', () => {

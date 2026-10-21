@@ -18,8 +18,12 @@ export { timeline, type EventKind, type TimelineData, type TimelineEvent, type T
 export { dotRow, place, statTile, svgSize, type DotRowOptions, type StatTileData, type StatTileOptions } from './statTile.ts'
 export { icon, ICON_NAMES, iconMark, ICONS, type IconName, type IconOptions, type IconPicture, type IconTextColor } from './icon.ts'
 export { legend, legendMarkup, legendTwin, type LegendItem, type LegendOptions } from './legend.ts'
+export { barLayout, bars, BARS_PAD, type BarItem, type BarsOptions } from './bars.ts'
+export { donut, DONUT_GAP, DONUT_RING, donutShares, type DonutOptions, type Slice } from './donut.ts'
+export { HEAT_SHADES, HEAT_STEPS, heatColors, heatmap, heatStep, type HeatmapData, type HeatmapOptions } from './heatmap.ts'
+export { fitLabel, STATUS_GLYPH, statusGrid, type StatusGridOptions, type StatusItem } from './statusGrid.ts'
 export { dash, dots, fillCircle, fillPolygon, fillRoundRect, hexRgb, strokeCircle, strokePolyline, strokeRoundRect, type Cap, type Dots, type Rgb } from './dots.ts'
-export { arcPoints, hiddenClasses, MIN_STROKE, pathPoints, readSvg, snapLine, type Label, type Painted } from './readSvg.ts'
+export { arcPoints, gradientColors, hiddenClasses, MIN_STROKE, pathPoints, readSvg, snapLine, type Label, type Painted } from './readSvg.ts'
 export {
   ansi,
   BLOCK_GLYPHS,

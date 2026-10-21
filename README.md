@@ -1,7 +1,7 @@
 # svg-panel
 
-Pictures for Claude Code mod panels: speedometer gauges, meters, sparklines, timelines, stat tiles, status icons and
-legends. Every picture is a pure function, data in, a `Picture` out:
+Pictures for Claude Code mod panels: speedometer gauges, meters, sparklines, timelines, bar charts, donuts, heatmaps,
+status grids, stat tiles, status icons and legends. Every picture is a pure function, data in, a `Picture` out:
 
 ```ts
 type Picture = { svg: string; alt: string; twin: string; isInteractive: boolean }
@@ -220,14 +220,63 @@ legend([
 // twin: ─ requests/s  ◆ deploy  ● online
 ```
 
+### bars
+
+One column per item over a baseline, its figure over it and its label under it. An optional `threshold` draws a dashed
+rule, and the columns at or past it take the warning colour unless an item names its own `status`. A label that does
+not fit its slot is left out of the picture and kept in the alt and the twin.
+
+```ts
+bars(
+  [{ label: 'mon', value: 42 }, { label: 'tue', value: 65 }, { label: 'wed', value: 30 }, { label: 'thu', value: 88 },
+   { label: 'fri', value: 54 }, { label: 'sat', value: 71 }, { label: 'sun', value: 20 }],
+  { threshold: 80, label: 'Deploys' },
+)
+// twin: Deploys ▄▆▃▇▅▆▂ high thu 88
+```
+
+### donut
+
+A ring cut into shares, the total in its middle and the shares listed beside it. Past `maxSlices` (5) the smallest
+shares fold into one `other`. The shares take blue, orange and aqua, then the secondary and muted inks.
+
+```ts
+donut([{ label: 'api', value: 5700 }, { label: 'web', value: 3850 }, { label: 'batch', value: 2850 }], { label: 'Traffic' })
+// twin: Traffic 12.4k: api 46% · web 31% · batch 23%
+```
+
+### heatmap
+
+Rows of cells in five steps of one colour, with row and column labels and a `less ■■■■■ more` key. A missing value is a
+short dash. The grid starts on a terminal cell's corner and a cell is two terminal columns wide, so it stays crisp as a
+Raster. The twin is a row of shades per row.
+
+```ts
+heatmap({ values: [[3, 8, 12, 20], [0, 4, null, 9]], rowLabels: ['web', 'api'], colLabels: ['0h', '6h', '12h', '18h'] })
+// twin: web ·▒▓█
+//       api ·░ ▒
+```
+
+### statusGrid
+
+A grid of tiles, one per thing watched: a status dot, the name, and a figure or the status's word under it. Six to a
+row by default. The twin gives each status its own shape as well as its colour: `●` ok, `▲` warning, `◆` serious,
+`✕` critical.
+
+```ts
+statusGrid([{ label: 'web-1', status: 'good', value: '312/s' }, { label: 'api-1', status: 'warning' }, { label: 'batch', status: 'critical' }])
+// twin: ● web-1  ▲ api-1  ✕ batch
+```
+
 ## On the terminal: Raster cells
 
 The terminal draws no `Svg`, but it has `Raster`: a fixed box of cells, each holding one character, a foreground colour and
 a background colour. `toRaster` draws any picture into one, in the same way as
 [chafa](https://hpjansson.org/chafa/), in TypeScript and with no packages:
 
-1. **Dots.** It reads the picture's own markup and paints the same shapes on an invisible canvas of dots: arcs, lines,
-   rounded rectangles and circles, filled or stroked, dashed where the Svg is dashed. Each shape paints by its distance
+1. **Dots.** It reads the picture's own markup and paints the same shapes on an invisible canvas of dots: arcs, curves,
+   lines, rounded rectangles, circles and ellipses, filled or stroked, dashed where the Svg is dashed. A gradient
+   paints in its mean colour. Each shape paints by its distance
    from the dot, so its edges are soft. What the picture's CSS hides, such as a timeline's hover tooltips, stays hidden.
 2. **Cells.** It cuts the canvas into terminal cells, 2 dots across and 4 down per cell.
 3. **Symbols.** For each cell it picks the character and the two colours that best repeat the cell's eight dots, by the
@@ -320,6 +369,8 @@ the light surface, aqua sits under 3:1 contrast, so a timeline always draws its 
 - four tiles: requests per second over a sparkline, hosts online over a row of host icons, the error rate over a meter,
   and the traffic trend as an icon;
 - the requests chart, with deploy and incident markers and the redline;
+- requests by host four ways: bars against each host's 400/s limit, a donut of traffic shares, a heatmap of the last
+  16 samples, and a status grid of the hosts;
 - CPU, memory and error meters, and a latency sparkline against its 250 ms target;
 - six hosts, each an icon beside a `Button` that cycles it through online, idle, offline and failed;
 - the legend of the icon set.
@@ -340,8 +391,8 @@ How it is built:
 To try it, either run `claude --plugin-dir examples/demo-mod`, or copy the folder into a session's mods folder.
 
 `claude plugin validate examples/demo-mod` passes, and `claude plugin test examples/demo-mod` runs
-`tests/pane.test.tsx`. Those tests check that the apps draw 25 `Svg` elements with their alts, that the terminal draws
-11 `Raster` elements and no `Svg`, with the figures and labels in letters in their cells and the hover tooltips left
+`tests/pane.test.tsx`. Those tests check that the apps draw 29 `Svg` elements with their alts, that the terminal draws
+15 `Raster` elements and no `Svg`, with the figures and labels in letters in their cells and the hover tooltips left
 out, that a press redraws on the desktop and the terminal, that a host button cycles its status and
 glyph colour, that live mode samples on a mocked clock until paused, and that the theme switch repaints.
 
@@ -385,7 +436,7 @@ Each component's test checks four things for a known input:
 takes, the braille dot order, where a gauge's figures land, the hidden tooltips, hairlines, a tile's nested body, arcs,
 and the size limits.
 
-`npm run mutate` applies 37 deliberate breakages, one at a time, and every one turns a test red.
+`npm run mutate` applies 51 deliberate breakages, one at a time, and every one turns a test red.
 
 ## Platform facts
 

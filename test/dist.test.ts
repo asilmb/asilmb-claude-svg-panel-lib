@@ -18,6 +18,11 @@ test('dist/svg-panel.js draws what src/ draws', () => {
     ['statTile', lib => lib.statTile({ label: 'Hosts', value: '2/3', body: lib.dotRow(['online', 'online', 'offline']) })],
     ['icon', lib => lib.icon('idle', { r: 12 })],
     ['legend', lib => lib.legend([{ label: 'a' }, { label: 'b', mark: 'square' }])],
+    ['bars', lib => lib.bars([{ label: 'a', value: 3 }, { label: 'b', value: 9 }], { threshold: 5 })],
+    ['donut', lib => lib.donut([{ label: 'a', value: 3 }, { label: 'b', value: 1 }])],
+    ['heatmap', lib => lib.heatmap({ values: [[1, 2], [3, null]], rowLabels: ['x', 'y'] })],
+    ['statusGrid', lib => lib.statusGrid([{ label: 'a', status: 'good' }, { label: 'b', status: 'critical' }])],
+    ['curve', lib => ({ svg: lib.svgDoc({ width: 80, height: 40, body: '<path d="M0 40C20 0 60 0 80 40" fill="none" stroke="#ffffff"/><ellipse cx="40" cy="20" rx="10" ry="5" fill="#ff0000"/>' }), alt: 'c', twin: '', isInteractive: false })],
   ]
   for (const [name, make] of cases) {
     const a = make(src)

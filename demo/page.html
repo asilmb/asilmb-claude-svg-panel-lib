@@ -195,6 +195,7 @@
       component('gauge', [s.throughput, s.latency], `${s.throughput.twin}\n${s.latency.twin}`),
       component('statTile', s.tiles, s.tiles.map(t => t.twin).join('\n')),
       component('timeline · interactive, hover a sample', [s.requests], s.requests.twin),
+      component('bars · donut · heatmap · statusGrid, requests by host', s.breakdown, s.breakdown.map(p => p.twin).join('\n')),
       component('meter', s.meters, s.meters.map(m => m.twin).join('\n')),
       component('sparkline', [s.sparkline], `Latency p95 ${s.sparkline.twin}`),
       component('icon', [...s.hosts, ...s.icons], `${s.hosts.map(h => `${h.glyph} ${h.alt}`).join('   ')}\n${s.icons.map(i => `${i.glyph} ${i.alt}`).join('   ')}`),
@@ -286,7 +287,7 @@
     label.textContent = 'Latency p95'
     trend.append(label, rasterCanvas(r.sparkline))
     lower.append(meters, trend)
-    return [cellsRow(r.gauges), cellsRow([r.requests]), cellsRow(r.tiles), lower, text]
+    return [cellsRow(r.gauges), cellsRow([r.requests]), cellsRow(r.breakdown), cellsRow(r.tiles), lower, text]
   }
 
   function twins() {
@@ -297,6 +298,8 @@
       esc(s.latency.twin),
       '',
       esc(s.requests.twin),
+      '',
+      ...s.breakdown.map(p => esc(p.twin)),
       '',
       ...s.tiles.map(t => esc(t.twin)),
       '',

@@ -6,8 +6,11 @@
 
 import type { DemoHost, DemoMarker, DemoSample, DemoState } from '../types'
 import {
+  bars,
+  donut,
   dotRow,
   gauge,
+  heatmap,
   icon,
   ICON_NAMES,
   ICONS,
@@ -16,6 +19,7 @@ import {
   sparkline,
   STATUS_TEXT_COLOR,
   statTile,
+  statusGrid,
   statusOf,
   themes,
   timeline,
@@ -26,6 +30,7 @@ import {
   type Picture,
   type RasterPicture,
   type Status,
+  type Theme,
   type Zone,
 } from '../vendor/svg-panel/index.ts'
 
@@ -47,6 +52,8 @@ export const REDLINE = 1600
 export const SLO_MS = 250
 
 export const HOST_NAMES = ['web-1', 'web-2', 'web-3', 'api-1', 'api-2', 'batch']
+/** The requests per second one host is built for. */
+export const HOST_LIMIT = 400
 const HOST_CYCLE: DemoHost[] = ['online', 'idle', 'offline', 'failed']
 
 export const EMPTY: DemoState = {
@@ -114,6 +121,18 @@ export function simulateMeasure(state: DemoState): DemoEvent {
   }
 }
 
+/**
+ * Each host's share of sample `i`'s requests per second, by the hosts as they
+ * are now: an online host takes a full share, an idle one half, give or take
+ * a little; an offline or failed host serves nothing and reads as `null`.
+ */
+export function hostLoad(state: DemoState, i: number): (number | null)[] {
+  const rps = state.samples[i]?.rps ?? 0
+  const weights = state.hosts.map((h, k) => (h === 'online' ? 1 : h === 'idle' ? 0.5 : 0) * (0.85 + 0.3 * noise(i, 10 + k)))
+  const sum = weights.reduce((a, b) => a + b, 0)
+  return weights.map(w => (w === 0 ? null : sum === 0 ? 0 : Math.round((rps * w) / sum)))
+}
+
 /** A history to start from, so every picture has something to show. */
 export function seed(): DemoState {
   let state = apply(apply(EMPTY, { event: 'status', host: 3, status: 'idle' }), { event: 'status', host: 5, status: 'offline' })
@@ -136,6 +155,8 @@ export type Scene = {
   meters: Picture[]
   sparkline: Picture
   hosts: IconPicture[]
+  /** Requests by host: as columns, as shares, over the last samples, and each host's tile. */
+  breakdown: Picture[]
   legend: Picture
   icons: IconPicture[]
 }
@@ -199,9 +220,31 @@ export function draw(state: DemoState, themeName: 'dark' | 'light'): Scene {
     ],
     sparkline: sparkline(state.samples.map(s => s.p95), { theme, width: 200, height: 40, last: 30, reference: SLO_MS, label: 'Latency p95, last 30 samples', format: ms }),
     hosts: state.hosts.map((h, i) => icon(h, { theme, r: 9, label: `${HOST_NAMES[i] ?? `host ${i + 1}`} ${h}` })),
+    breakdown: breakdown(state, theme),
     legend: legend(ICON_NAMES.map(name => ({ label: ICONS[name].label, mark: { icon: name } })), { theme, width: 300 }),
     icons: ICON_NAMES.map(name => icon(name, { theme, r: 9 })),
   }
+}
+
+/** The breakdown by host, drawn from `hostLoad`: four pictures of the same numbers. */
+function breakdown(state: DemoState, theme: Theme): Picture[] {
+  const n = state.samples.length
+  const now = hostLoad(state, n - 1)
+  const name = (k: number) => HOST_NAMES[k] ?? `host ${k + 1}`
+  const recent = Array.from({ length: Math.min(16, n) }, (_, j) => n - Math.min(16, n) + j)
+  const word: Record<DemoHost, Status> = { online: 'good', idle: 'warning', offline: 'serious', failed: 'critical' }
+  return [
+    bars(state.hosts.map((_, k) => ({ label: name(k), value: now[k] ?? 0 })), { theme, threshold: HOST_LIMIT, label: 'Requests/s by host', format: whole, width: 300 }),
+    donut(state.hosts.map((_, k) => ({ label: name(k), value: now[k] ?? 0 })), { theme, label: 'Traffic share', format: whole }),
+    heatmap(
+      { values: state.hosts.map((_, k) => recent.map(i => hostLoad(state, i)[k] ?? null)), rowLabels: HOST_NAMES, colLabels: recent.map(i => `#${i + 1}`) },
+      { theme, label: 'Requests/s by host, last 16 samples', format: whole, min: 0, max: HOST_LIMIT },
+    ),
+    statusGrid(
+      state.hosts.map((h, k) => ({ label: name(k), status: word[h], value: now[k] === null ? h : `${whole(now[k] ?? 0)}/s` })),
+      { theme, label: 'Hosts' },
+    ),
+  ]
 }
 
 export type TerminalScene = {
@@ -210,6 +253,7 @@ export type TerminalScene = {
   tiles: RasterPicture[]
   meters: RasterPicture[]
   sparkline: RasterPicture
+  breakdown: RasterPicture[]
 }
 
 /** How wide the requests chart is drawn on the terminal, in cells, when the pane has room. */
@@ -228,5 +272,6 @@ export function rasterize(scene: Scene, themeName: 'dark' | 'light', columns: nu
     tiles: scene.tiles.map((tile, i) => cells(`tile-${i}`, tile)),
     meters: scene.meters.map((m, i) => cells(`meter-${i}`, m)),
     sparkline: cells('latency-trend', scene.sparkline),
+    breakdown: scene.breakdown.map((p, i) => cells(['host-load', 'traffic-share', 'host-heat', 'host-grid'][i] ?? `breakdown-${i}`, p)),
   }
 }

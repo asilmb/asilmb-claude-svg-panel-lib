@@ -151,6 +151,284 @@ export function niceMax(max        )         {
   return step * power
 }
 
+// ---- src/twin.ts
+// Twins: the plain-text forms a terminal prints where the app draws a picture.
+
+export const BAR_FULL = '█'
+export const BAR_EMPTY = '░'
+export const BAR_TICK = '│'
+export const BLOCKS = '▁▂▃▄▅▆▇█'
+
+/**
+ * A `█░` bar `width` cells wide filled to `value`, with `│` in the cell where
+ * `tick` falls. `bar(236, 300, { tick: 270 })` is `████████████████░░│░`.
+ */
+export function bar(value        , max        , options             = {})         {
+  const { width = 20, min = 0, tick } = options
+  const cells = Math.max(1, Math.round(width))
+  const at = (v        ) => (max === min ? 0 : clamp((finite(v, min) - min) / (max - min), 0, 1))
+  const filled = Math.round(at(value) * cells)
+  const chars           = Array.from({ length: cells }, (_, i) => (i < filled ? BAR_FULL : BAR_EMPTY))
+  if (tick !== undefined && Number.isFinite(tick)) {
+    chars[clamp(Math.round(at(tick) * cells), 0, cells - 1)] = BAR_TICK
+  }
+  return chars.join('')
+}
+
+/** One `▁`..`█` block per value, low to high; thinned to `width` when longer. */
+export function blocks(values                   , options                = {})         {
+  const kept = options.width === undefined ? values : thin(values.length, options.width).map(i => values[i] ?? 0)
+  const clean = kept.map(v => finite(v))
+  if (clean.length === 0) return ''
+  const range = extent(clean)
+  const lo = options.min ?? range.lo
+  const hi = options.max ?? range.hi
+  const top = BLOCKS.length - 1
+  return clean
+    .map(v => BLOCKS[hi === lo ? Math.floor(top / 2) : Math.round(clamp((v - lo) / (hi - lo), 0, 1) * top)])
+    .join('')
+}
+
+/**
+ * At most `limit` indices of `0..count-1`, evenly spread, always the first and
+ * the last, plus every index in `keep`; sorted.
+ */
+export function thin(count        , limit        , keep                   = [])           {
+  if (count <= 0) return []
+  const picked = new Set        ()
+  if (count <= limit) {
+    for (let i = 0; i < count; i++) picked.add(i)
+  } else {
+    const slots = Math.max(2, Math.floor(limit))
+    for (let k = 0; k < slots; k++) picked.add(Math.round((k * (count - 1)) / (slots - 1)))
+  }
+  for (const i of keep) if (i >= 0 && i < count) picked.add(i)
+  return [...picked].sort((a, b) => a - b)
+}
+
+// ---- src/theme.ts
+// Every colour a picture paints, in one place, for a dark and a light surface.
+
+/** Fixed in both modes; each always ships beside a word or an icon. */
+const STATUS                         = {
+  good: '#0ca30c',
+  warning: '#fab219',
+  serious: '#ec835a',
+  critical: '#d03b3b',
+}
+
+export const dark        = {
+  name: 'dark',
+  surface: '#1a1a19',
+  ink: '#f0efec',
+  ink2: '#c3c2b7',
+  muted: '#898781',
+  grid: '#2c2c2a',
+  baseline: '#383835',
+  status: STATUS,
+  series: { blue: '#3987e5', orange: '#d95926', aqua: '#199e70', violet: '#9085e9' },
+}
+
+/** The same roles stepped for a light surface: the same ramps, not a flip. */
+export const light        = {
+  name: 'light',
+  surface: '#fcfcfb',
+  ink: '#0b0b0b',
+  ink2: '#52514e',
+  muted: '#898781',
+  grid: '#e1e0d9',
+  baseline: '#c3c2b7',
+  status: STATUS,
+  series: { blue: '#2a78d6', orange: '#eb6834', aqua: '#1baf7a', violet: '#6250d6' },
+}
+
+export const themes = { dark, light }         
+
+/** The word that goes beside each status colour. */
+export const STATUS_WORD                         = {
+  good: 'ok',
+  warning: 'warning',
+  serious: 'serious',
+  critical: 'critical',
+}
+
+/** The Claude Code theme key a `Text` beside a status mark wears. */
+export const STATUS_TEXT_COLOR                                                  = {
+  good: 'success',
+  warning: 'warning',
+  serious: 'warning',
+  critical: 'error',
+}
+
+/** A theme by name or as given; dark when absent. */
+export function pickTheme(theme                                      )        {
+  if (theme === undefined) return dark
+  return typeof theme === 'string' ? themes[theme] : theme
+}
+
+// ---- src/bars.ts
+// One column per item over a baseline, each labelled under it and its figure
+// over it, with an optional dashed threshold the columns past it turn warning at.
+
+export const BARS_PAD = { left: 8, right: 8, top: 20, bottom: 22 }
+
+/** Where each column stands: its left edge, its width and its top, in a chart of this size and scale. */
+export function barLayout(count        , width        , height        , top        )                                                                                    {
+  const plot = width - BARS_PAD.left - BARS_PAD.right
+  const slot = count === 0 ? plot : plot / count
+  const bar = Math.max(1, slot * 0.64)
+  return {
+    slot,
+    bar,
+    x: i => BARS_PAD.left + i * slot + (slot - bar) / 2,
+    y: scale(0, top, height - BARS_PAD.bottom, BARS_PAD.top),
+  }
+}
+
+export function bars(items                    , options              = {})          {
+  const theme = pickTheme(options.theme)
+  const fmt = options.format ?? abbreviate
+  const width = options.width ?? 240
+  const height = options.height ?? 140
+  const values = items.map(item => Math.max(0, finite(item.value)))
+  const threshold = options.threshold !== undefined && Number.isFinite(options.threshold) ? options.threshold : undefined
+  const top = options.max ?? niceMax(Math.max(1, extent(values).hi, threshold ?? 0))
+  const { slot, bar, x, y } = barLayout(items.length, width, height, top)
+  const base = height - BARS_PAD.bottom
+  const parts           = []
+  // Words go last, over the columns and the rules.
+  const words           = []
+
+  items.forEach((item, i) => {
+    const v = values[i] 
+    const status = item.status ?? (threshold !== undefined && v >= threshold ? 'warning' : undefined)
+    const fill = status === undefined ? theme.series.blue : theme.status[status]
+    const yTop = y(v)
+    if (base - yTop > 0) {
+      parts.push(`<rect class="bar" x="${num(x(i))}" y="${num(yTop)}" width="${num(bar)}" height="${num(base - yTop)}" rx="${num(Math.min(3, bar / 3))}" fill="${fill}"/>`)
+    }
+    const cx = x(i) + bar / 2
+    const figure = fmt(v)
+    // Labels only where they fit their slot; the alt and the twin carry every one.
+    if (textWidth(figure, 10) <= slot + 2) words.push(text(cx, yTop - 5, figure, { size: 10, fill: theme.ink2, anchor: 'middle', cls: 'bar-figure' }))
+    if (textWidth(item.label, 10) <= slot + 2) words.push(text(cx, base + 15, item.label, { size: 10, fill: theme.muted, anchor: 'middle', cls: 'bar-label' }))
+  })
+  parts.push(`<path class="bars-baseline" d="M${BARS_PAD.left} ${num(base)}H${num(width - BARS_PAD.right)}" stroke="${theme.baseline}" stroke-width="1"/>`)
+  if (threshold !== undefined) {
+    const ty = y(threshold)
+    parts.push(`<path class="bars-threshold" d="M${BARS_PAD.left} ${num(ty)}H${num(width - BARS_PAD.right)}" stroke="${theme.status.warning}" stroke-width="1.5" stroke-dasharray="5 4"/>`)
+  }
+
+  const name = options.label ?? 'Bars'
+  const listed = items.slice(0, 12).map((item, i) => `${item.label} ${fmt(values[i] )}`)
+  const more = items.length > 12 ? `, and ${items.length - 12} more` : ''
+  const high = values.indexOf(extent(values).hi)
+  const alt = items.length === 0
+    ? `${name}: no values yet`
+    : `${name}: ${listed.join(', ')}${more}` + (threshold === undefined ? '' : `; threshold ${fmt(threshold)}`)
+  const svg = svgDoc({
+    width,
+    height,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join('') + words.join(''),
+  })
+  const lead = options.label === undefined ? '' : `${options.label} `
+  return {
+    svg: assertBudget(svg),
+    alt,
+    twin: items.length === 0 ? `${lead}no values` : `${lead}${blocks(values, { min: 0, max: top })} high ${items[high] .label} ${fmt(values[high] )}`,
+    isInteractive: false,
+  }
+}
+
+// ---- src/donut.ts
+// A ring cut into shares, the total in its middle and a legend of shares
+// beside it. Past `maxSlices` the smallest shares fold into one `other`.
+
+/** The ring's centre, radius and width in the picture's own pixels. */
+export const DONUT_RING = { cx: 72, cy: 72, r: 50, width: 18 }
+/** The gap between two shares, in degrees, so each reads apart. */
+export const DONUT_GAP = 2
+
+/** The shares to draw: positive values only, the largest `max - 1` apart and the rest as `other` when there are more than `max`. */
+export function donutShares(slices                  , max        , theme       )          {
+  const colors = [theme.series.blue, theme.series.orange, theme.series.aqua, theme.ink2, theme.muted]
+  const kept = slices
+    .map((s, i) => ({ ...s, value: Math.max(0, finite(s.value)), i }))
+    .filter(s => s.value > 0)
+  const limit = Math.max(1, Math.floor(max))
+  let shown = kept
+  if (kept.length > limit) {
+    const byValue = [...kept].sort((a, b) => b.value - a.value)
+    const big = new Set(byValue.slice(0, limit - 1).map(s => s.i))
+    const rest = kept.filter(s => !big.has(s.i)).reduce((sum, s) => sum + s.value, 0)
+    shown = [...kept.filter(s => big.has(s.i)), { label: 'other', value: rest, i: -1, color: theme.muted }]
+  }
+  return shown.map((s, k) => ({ label: s.label, value: s.value, color: s.color ?? colors[k % colors.length] ?? theme.ink2 }))
+}
+
+export function donut(slices                  , options               = {})          {
+  const theme = pickTheme(options.theme)
+  const fmt = options.format ?? abbreviate
+  const shares = donutShares(slices, options.maxSlices ?? 5, theme)
+  const total = shares.reduce((sum, s) => sum + s.value, 0)
+  const pct = (v        ) => (total === 0 ? 0 : Math.round((v / total) * 100))
+  const { cx, cy, r, width: ring } = DONUT_RING
+  const showLegend = options.legend ?? true
+  const rows = shares.map(s => `${s.label} ${pct(s.value)}%`)
+  const legendX = cx + r + ring / 2 + 16
+  const width = showLegend && shares.length > 0
+    ? Math.max(232, Math.ceil(legendX + 16 + Math.max(...rows.map(row => textWidth(row, 11))) + 8))
+    : 2 * cx
+  const height = Math.max(2 * cy, 20 + shares.length * 20)
+  const parts           = []
+
+  if (total === 0) {
+    parts.push(`<circle class="donut-track" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${theme.grid}" stroke-width="${ring}"/>`)
+  } else if (shares.length === 1) {
+    parts.push(`<circle class="donut-slice" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${shares[0] .color}" stroke-width="${ring}"/>`)
+  } else {
+    let a = 0
+    for (const s of shares) {
+      const sweep = (s.value / total) * 360
+      // Each share gives up the gap at its end, never more than half of itself.
+      const gap = Math.min(DONUT_GAP, sweep / 2)
+      parts.push(`<path class="donut-slice" d="${arcPath(cx, cy, r, a, a + sweep - gap)}" fill="none" stroke="${s.color}" stroke-width="${ring}"/>`)
+      a += sweep
+    }
+  }
+  parts.push(text(cx, cy + 6, options.center ?? fmt(total), { size: 18, fill: theme.ink, anchor: 'middle', weight: 600, cls: 'donut-center' }))
+  if (showLegend) {
+    const top = cy - ((shares.length - 1) * 20) / 2
+    shares.forEach((s, i) => {
+      const ry = top + i * 20
+      parts.push(
+        `<rect class="donut-swatch" x="${num(legendX)}" y="${num(ry - 5)}" width="10" height="10" rx="2" fill="${s.color}"/>`,
+        text(legendX + 16, ry + 4, rows[i] , { size: 11, fill: theme.ink2, cls: 'donut-row' }),
+      )
+    })
+  }
+
+  const name = options.label ?? 'Shares'
+  const listed = shares.map(s => `${s.label} ${pct(s.value)}% (${fmt(s.value)})`).join(', ')
+  const alt = shares.length === 0 ? `${name}: nothing yet` : `${name}: total ${fmt(total)}; ${listed}`
+  const svg = svgDoc({
+    width,
+    height,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join(''),
+  })
+  const lead = options.label === undefined ? '' : `${options.label} `
+  return {
+    svg: assertBudget(svg),
+    alt,
+    twin: shares.length === 0 ? `${lead}nothing yet` : `${lead}${fmt(total)}: ${rows.join(' · ')}`,
+    isInteractive: false,
+  }
+}
+
 // ---- src/dots.ts
 // The dot canvas the terminal branch draws on: two dots across and four down
 // per terminal cell. Every shape paints by its signed distance, so its edges
@@ -369,121 +647,6 @@ export function dash(points                  , closed         , pattern         
   return out
 }
 
-// ---- src/twin.ts
-// Twins: the plain-text forms a terminal prints where the app draws a picture.
-
-export const BAR_FULL = '█'
-export const BAR_EMPTY = '░'
-export const BAR_TICK = '│'
-export const BLOCKS = '▁▂▃▄▅▆▇█'
-
-/**
- * A `█░` bar `width` cells wide filled to `value`, with `│` in the cell where
- * `tick` falls. `bar(236, 300, { tick: 270 })` is `████████████████░░│░`.
- */
-export function bar(value        , max        , options             = {})         {
-  const { width = 20, min = 0, tick } = options
-  const cells = Math.max(1, Math.round(width))
-  const at = (v        ) => (max === min ? 0 : clamp((finite(v, min) - min) / (max - min), 0, 1))
-  const filled = Math.round(at(value) * cells)
-  const chars           = Array.from({ length: cells }, (_, i) => (i < filled ? BAR_FULL : BAR_EMPTY))
-  if (tick !== undefined && Number.isFinite(tick)) {
-    chars[clamp(Math.round(at(tick) * cells), 0, cells - 1)] = BAR_TICK
-  }
-  return chars.join('')
-}
-
-/** One `▁`..`█` block per value, low to high; thinned to `width` when longer. */
-export function blocks(values                   , options                = {})         {
-  const kept = options.width === undefined ? values : thin(values.length, options.width).map(i => values[i] ?? 0)
-  const clean = kept.map(v => finite(v))
-  if (clean.length === 0) return ''
-  const range = extent(clean)
-  const lo = options.min ?? range.lo
-  const hi = options.max ?? range.hi
-  const top = BLOCKS.length - 1
-  return clean
-    .map(v => BLOCKS[hi === lo ? Math.floor(top / 2) : Math.round(clamp((v - lo) / (hi - lo), 0, 1) * top)])
-    .join('')
-}
-
-/**
- * At most `limit` indices of `0..count-1`, evenly spread, always the first and
- * the last, plus every index in `keep`; sorted.
- */
-export function thin(count        , limit        , keep                   = [])           {
-  if (count <= 0) return []
-  const picked = new Set        ()
-  if (count <= limit) {
-    for (let i = 0; i < count; i++) picked.add(i)
-  } else {
-    const slots = Math.max(2, Math.floor(limit))
-    for (let k = 0; k < slots; k++) picked.add(Math.round((k * (count - 1)) / (slots - 1)))
-  }
-  for (const i of keep) if (i >= 0 && i < count) picked.add(i)
-  return [...picked].sort((a, b) => a - b)
-}
-
-// ---- src/theme.ts
-// Every colour a picture paints, in one place, for a dark and a light surface.
-
-/** Fixed in both modes; each always ships beside a word or an icon. */
-const STATUS                         = {
-  good: '#0ca30c',
-  warning: '#fab219',
-  serious: '#ec835a',
-  critical: '#d03b3b',
-}
-
-export const dark        = {
-  name: 'dark',
-  surface: '#1a1a19',
-  ink: '#f0efec',
-  ink2: '#c3c2b7',
-  muted: '#898781',
-  grid: '#2c2c2a',
-  baseline: '#383835',
-  status: STATUS,
-  series: { blue: '#3987e5', orange: '#d95926', aqua: '#199e70', violet: '#9085e9' },
-}
-
-/** The same roles stepped for a light surface: the same ramps, not a flip. */
-export const light        = {
-  name: 'light',
-  surface: '#fcfcfb',
-  ink: '#0b0b0b',
-  ink2: '#52514e',
-  muted: '#898781',
-  grid: '#e1e0d9',
-  baseline: '#c3c2b7',
-  status: STATUS,
-  series: { blue: '#2a78d6', orange: '#eb6834', aqua: '#1baf7a', violet: '#6250d6' },
-}
-
-export const themes = { dark, light }         
-
-/** The word that goes beside each status colour. */
-export const STATUS_WORD                         = {
-  good: 'ok',
-  warning: 'warning',
-  serious: 'serious',
-  critical: 'critical',
-}
-
-/** The Claude Code theme key a `Text` beside a status mark wears. */
-export const STATUS_TEXT_COLOR                                                  = {
-  good: 'success',
-  warning: 'warning',
-  serious: 'warning',
-  critical: 'error',
-}
-
-/** A theme by name or as given; dark when absent. */
-export function pickTheme(theme                                      )        {
-  if (theme === undefined) return dark
-  return typeof theme === 'string' ? themes[theme] : theme
-}
-
 // ---- src/gauge.ts
 // A 240° arc over a scale, a threshold tick, the value as the hero figure and
 // a status dot with its word.
@@ -574,6 +737,125 @@ export function gauge(data           , options               = {})          {
     twin: `${lead}${fmt(value)} / ${fmt(max)} ${bar(value, max, { min, tick: data.threshold })} ${word}`,
     isInteractive: false,
   }
+}
+
+// ---- src/heatmap.ts
+// A grid of cells in five steps of one colour, with row and column labels and
+// a `less ■■■■■ more` key; a missing value is a short dash.
+
+export const HEAT_STEPS = 5
+/** The twin's shades: a space for a missing value, then one per step, faint to full. */
+export const HEAT_SHADES = ' ·░▒▓█'
+
+/** The step (0 to 4) a value falls in on `[lo, hi]`. */
+export function heatStep(value        , lo        , hi        )         {
+  if (hi <= lo) return HEAT_STEPS - 1
+  return Math.min(HEAT_STEPS - 1, Math.max(0, Math.floor(((value - lo) / (hi - lo)) * HEAT_STEPS)))
+}
+
+/** `#rgb` or `#rrggbb` as three channels; black when it is neither. */
+function channels(hex        )           {
+  const m = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(hex.trim())
+  const full = m ? (m[1] .length === 3 ? [...m[1] ].map(c => c + c).join('') : m[1] ) : '000000'
+  return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16))
+}
+
+function mix(a        , b        , t        )         {
+  const [x, y] = [channels(a), channels(b)]
+  return `#${x.map((v, i) => Math.round(v + (y[i]  - v) * t).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** The five fills, from faint to full, mixed from the grid colour to `color`. */
+export function heatColors(theme       , color        )           {
+  return Array.from({ length: HEAT_STEPS }, (_, k) => mix(theme.grid, color, 0.2 + (0.8 * k) / (HEAT_STEPS - 1)))
+}
+
+export function heatmap(data             , options                 = {})          {
+  const theme = pickTheme(options.theme)
+  const fmt = options.format ?? abbreviate
+  const size = options.cell ?? 14
+  const gap = options.gap ?? 2
+  const pitch = size + gap
+  const fills = heatColors(theme, options.color ?? theme.series.blue)
+  const rows = data.values
+  const columns = Math.max(0, ...rows.map(r => r.length))
+  const present = rows.flatMap(r => r.filter((v)              => typeof v === 'number' && Number.isFinite(v)))
+  let lo = Infinity
+  let hi = -Infinity
+  for (const v of present) {
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+  }
+  lo = options.min ?? (present.length ? lo : 0)
+  hi = options.max ?? (present.length ? hi : 1)
+
+  const rowLabels = data.rowLabels ?? []
+  const colLabels = data.colLabels ?? []
+  // The grid starts on a terminal cell's corner (8 by 16 CSS pixels), so on a Raster each cell keeps to its own
+  // columns and rows; the row labels get room for a terminal's letters, which run wider than the Svg's.
+  const labelRoom = (l        ) => Math.max(textWidth(l, 10), [...l].length * 8)
+  const left = Math.ceil((6 + (rowLabels.length ? Math.max(...rowLabels.map(labelRoom)) + 6 : 0)) / 8) * 8
+  const top = Math.ceil((6 + (colLabels.length ? 14 : 0)) / 16) * 16
+  const showKey = options.key ?? true
+  const gridW = columns * pitch - gap
+  const keyW = textWidth('less', 10) + 6 + HEAT_STEPS * pitch + textWidth('more', 10) + 4
+  const width = Math.ceil(left + Math.max(gridW, showKey ? keyW : 0) + 6)
+  const height = Math.ceil(top + rows.length * pitch - gap + (showKey ? 22 : 6))
+  const parts           = []
+
+  // Column labels where they fit: every k-th, so none runs into the next.
+  const stride = Math.max(1, Math.ceil((Math.max(0, ...colLabels.map(l => textWidth(l, 10))) + 4) / pitch))
+  colLabels.forEach((l, c) => {
+    if (c % stride === 0 && c < columns) parts.push(text(left + c * pitch, top - 4, l, { size: 10, fill: theme.muted, cls: 'heat-col' }))
+  })
+  rows.forEach((row, r) => {
+    const y = top + r * pitch
+    if (rowLabels[r] !== undefined) parts.push(text(left - 6, y + size - 2, rowLabels[r] , { size: 10, fill: theme.muted, anchor: 'end', cls: 'heat-row' }))
+    for (let c = 0; c < columns; c++) {
+      const v = row[c]
+      const x = left + c * pitch
+      const ok = typeof v === 'number' && Number.isFinite(v)
+      parts.push(ok
+        ? `<rect class="heat-cell" x="${num(x)}" y="${num(y)}" width="${size}" height="${size}" rx="2" fill="${fills[heatStep(v, lo, hi)]}"/>`
+        : `<rect class="heat-empty" x="${num(x + size / 2 - 3)}" y="${num(y + size / 2 - 1)}" width="6" height="2" rx="1" fill="${theme.muted}"/>`)
+    }
+  })
+  if (showKey) {
+    const ky = top + rows.length * pitch - gap + 8
+    const kx = left + Math.max(gridW, keyW) - keyW
+    parts.push(text(kx, ky + 9, 'less', { size: 10, fill: theme.muted, cls: 'heat-key' }))
+    const sx = kx + textWidth('less', 10) + 6
+    fills.forEach((f, k) => parts.push(`<rect x="${num(sx + k * pitch)}" y="${num(ky)}" width="${size}" height="${size}" rx="2" fill="${f}"/>`))
+    parts.push(text(sx + HEAT_STEPS * pitch + 2, ky + 9, 'more', { size: 10, fill: theme.muted }))
+  }
+
+  // The hottest cell, named by its labels where there are labels.
+  let best                                                 
+  rows.forEach((row, r) => row.forEach((v, c) => {
+    if (typeof v === 'number' && Number.isFinite(v) && (best === undefined || v > best.v)) best = { r, c, v }
+  }))
+  const name = options.label ?? 'Heatmap'
+  const where = best === undefined ? '' : [rowLabels[best.r], colLabels[best.c]].filter(Boolean).join(', ')
+  const alt = present.length === 0
+    ? `${name}: no values yet`
+    : `${name}: ${rows.length} rows by ${columns} columns, low ${fmt(Math.min(...present))}, high ${fmt(best .v)}${where ? ` at ${where}` : ''}`
+  const svg = svgDoc({
+    width,
+    height,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join(''),
+  })
+  // The twin: one shade a cell, a line a row, the rows' labels in front.
+  const pad = Math.max(0, ...rowLabels.map(l => [...l].length))
+  const twin = rows.map((row, r) => {
+    const shades = Array.from({ length: columns }, (_, c) => {
+      const v = row[c]
+      return typeof v === 'number' && Number.isFinite(v) ? HEAT_SHADES[1 + heatStep(v, lo, hi)] : HEAT_SHADES[0]
+    }).join('')
+    return pad === 0 ? shades : `${(rowLabels[r] ?? '').padEnd(pad)} ${shades}`
+  }).join('\n')
+  return { svg: assertBudget(svg), alt, twin, isInteractive: false }
 }
 
 // ---- src/icon.ts
@@ -833,10 +1115,11 @@ export function meter(data           , options               = {})          {
 
 // ---- src/readSvg.ts
 // Reads the markup the components write and paints the same shapes on a dot
-// canvas: rects, circles, lines and paths (with arcs), stroked or filled, in
-// groups and nested `<svg>`s. `<text>` is not painted but kept as a label, to
-// be set in letters over the cells. What CSS hides (a hover's tooltip) stays
-// hidden; what this subset does not know is skipped.
+// canvas: rects, circles, ellipses, lines and paths (with arcs and curves),
+// stroked or filled, in groups and nested `<svg>`s; a gradient fill paints in
+// its mean colour. `<text>` is not painted but kept as a label, to be set in
+// letters over the cells. What CSS hides (a hover's tooltip) and what `<defs>`
+// holds stay unpainted; what this subset does not know is skipped.
 
 /** A `<text>`, in dots: where its anchor and baseline sit, and how it is set. */
 
@@ -901,16 +1184,88 @@ function transformOf(value                    )            {
   return t
 }
 
-function colorOf(value                    , current                    )                  {
+function colorOf(value                    , current                    , paints                           )                  {
   if (value === undefined) return undefined
   const v = value.trim()
+  const url = /^url\(\s*#([^)\s]+)\s*\)/.exec(v)
+  if (url) return paints?.get(url[1] )
   if (v === 'currentColor') return current === undefined ? undefined : hexRgb(current)
   if (v === 'black') return [0, 0, 0]
   if (v === 'white') return [255, 255, 255]
   return hexRgb(v)
 }
 
-/** A path's `d` as subpaths of points, arcs flattened every `step` units. M L H V A Z, absolute or relative. */
+/**
+ * The colour a gradient averages to over its length, by id: a terminal cell
+ * holds two colours, so a fill that runs from green to red is drawn in the
+ * colour between them. Stops come from `<stop>`s, or from the gradient its
+ * `href` names; `stop-color` may be an attribute or in `style`.
+ */
+export function gradientColors(svg        )                   {
+  const found = new Map                                                                ()
+  for (const m of svg.matchAll(/<(linear|radial)Gradient\b([^>]*?)(\/?)>(?:([\s\S]*?)<\/\1Gradient>)?/g)) {
+    const attrs = attrsOf(m[2] ?? '')
+    if (attrs.id === undefined) continue
+    const stops                               = []
+    let last = 0
+    for (const st of (m[3] ? '' : (m[4] ?? '')).matchAll(/<stop\b([^>]*)>/g)) {
+      const a = attrsOf(st[1] ?? '')
+      const inline = /stop-color\s*:\s*([^;"]+)/.exec(a.style ?? '')?.[1]
+      const color = colorOf(a['stop-color'] ?? inline ?? '#000000', undefined)
+      if (!color) continue
+      const raw = (a.offset ?? '0').trim()
+      const at = Math.min(1, Math.max(last, raw.endsWith('%') ? number(raw) / 100 : number(raw)))
+      last = at
+      stops.push({ at, color })
+    }
+    found.set(attrs.id, { stops, href: (attrs.href ?? attrs['xlink:href'])?.replace(/^#/, '') })
+  }
+  const out = new Map             ()
+  for (const [id, g] of found) {
+    const stops = g.stops.length > 0 ? g.stops : (g.href !== undefined ? found.get(g.href)?.stops ?? [] : [])
+    if (stops.length === 0) continue
+    // The mean of the colour along 0..1: flat before the first stop and after the last, linear between.
+    const sum = [0, 0, 0]
+    const add = (c     , w        ) => { for (let k = 0; k < 3; k++) sum[k] = sum[k]  + c[k]  * w }
+    add(stops[0] .color, stops[0] .at)
+    for (let j = 0; j + 1 < stops.length; j++) {
+      const a = stops[j] 
+      const b = stops[j + 1] 
+      const w = b.at - a.at
+      add(a.color, w / 2)
+      add(b.color, w / 2)
+    }
+    const tail = stops[stops.length - 1] 
+    add(tail.color, 1 - tail.at)
+    out.set(id, [sum[0] , sum[1] , sum[2] ])
+  }
+  return out
+}
+
+/** A cubic Bézier from `p0` as points after it, about `step` apart along its control polygon. */
+function cubicPoints(p0       , c1       , c2       , p1       , step        )          {
+  const length = Math.hypot(c1.x - p0.x, c1.y - p0.y) + Math.hypot(c2.x - c1.x, c2.y - c1.y) + Math.hypot(p1.x - c2.x, p1.y - c2.y)
+  const n = Math.min(256, Math.max(1, Math.ceil(length / Math.max(step, 1e-3))))
+  const out          = []
+  for (let j = 1; j <= n; j++) {
+    const t = j / n
+    const u = 1 - t
+    out.push({
+      x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x,
+      y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y,
+    })
+  }
+  return out
+}
+
+/** A quadratic Bézier, as the cubic it equals. */
+function quadPoints(p0       , c       , p1       , step        )          {
+  const c1 = { x: p0.x + (2 / 3) * (c.x - p0.x), y: p0.y + (2 / 3) * (c.y - p0.y) }
+  const c2 = { x: p1.x + (2 / 3) * (c.x - p1.x), y: p1.y + (2 / 3) * (c.y - p1.y) }
+  return cubicPoints(p0, c1, c2, p1, step)
+}
+
+/** A path's `d` as subpaths of points, arcs and curves flattened every `step` units. M L H V C S Q T A Z, absolute or relative. */
 export function pathPoints(d        , step        )                                         {
   // Every command letter is a token, so one this subset does not draw stops the path instead of passing for a line.
   const tokens = d.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? []
@@ -920,6 +1275,9 @@ export function pathPoints(d        , step        )                             
   let y = 0
   let start = { x: 0, y: 0 }
   let command = ''
+  // The last curve's second control point, for the reflection S and T start from.
+  let cubic                   
+  let quad                   
   let i = 0
   const read = () => Number(tokens[i++])
   const finish = (closed         ) => {
@@ -934,12 +1292,14 @@ export function pathPoints(d        , step        )                             
         finish(true)
         x = start.x
         y = start.y
+        cubic = undefined
+        quad = undefined
         continue
       }
     }
     const needs = ARGS[command.toUpperCase()]
     if (needs === undefined) {
-      // A command this subset does not draw (a curve), or numbers before any: stop here.
+      // A command this subset does not draw, or numbers before any: stop here.
       finish(false)
       return out
     }
@@ -950,9 +1310,18 @@ export function pathPoints(d        , step        )                             
       }
     }
     const rel = command === command.toLowerCase()
+    const kind = command.toUpperCase()
     // A line after a close starts from where the close went back to.
-    if (command.toUpperCase() !== 'M' && current.length === 0) current = [{ x, y }]
-    switch (command.toUpperCase()) {
+    if (kind !== 'M' && current.length === 0) current = [{ x, y }]
+    const pt = () => {
+      const px = read() + (rel ? x : 0)
+      return { x: px, y: read() + (rel ? y : 0) }
+    }
+    const here = { x, y }
+    const mirror = (c                   ) => (c === undefined ? here : { x: 2 * x - c.x, y: 2 * y - c.y })
+    if (kind !== 'C' && kind !== 'S') cubic = undefined
+    if (kind !== 'Q' && kind !== 'T') quad = undefined
+    switch (kind) {
       case 'M': {
         finish(false)
         x = read() + (rel ? x : 0)
@@ -976,6 +1345,27 @@ export function pathPoints(d        , step        )                             
         y = read() + (rel ? y : 0)
         current.push({ x, y })
         break
+      case 'C':
+      case 'S': {
+        const c1 = kind === 'C' ? pt() : mirror(cubic)
+        const c2 = pt()
+        const end = pt()
+        current.push(...cubicPoints(here, c1, c2, end, step))
+        cubic = c2
+        x = end.x
+        y = end.y
+        break
+      }
+      case 'Q':
+      case 'T': {
+        const c = kind === 'Q' ? pt() : mirror(quad)
+        const end = pt()
+        current.push(...quadPoints(here, c, end, step))
+        quad = c
+        x = end.x
+        y = end.y
+        break
+      }
       case 'A': {
         const rx = read()
         const ry = read()
@@ -996,7 +1386,7 @@ export function pathPoints(d        , step        )                             
 }
 
 /** How many numbers each drawn command takes. */
-const ARGS                         = { M: 2, L: 2, H: 1, V: 1, A: 7 }
+const ARGS                         = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7 }
 
 /** An endpoint arc as points after its start, the SVG way (its implementation notes, F.6.5). */
 export function arcPoints(
@@ -1042,6 +1432,9 @@ export function arcPoints(
   return out
 }
 
+/** Elements whose children are definitions, not drawing: what they hold is never painted where it stands. */
+const NOT_DRAWN = new Set(['defs', 'clippath', 'mask', 'pattern', 'marker', 'symbol', 'lineargradient', 'radialgradient', 'filter'])
+
 /** The thinnest a stroke is drawn, in dots: one dot across, so a hairline still shows. */
 export const MIN_STROKE = 1
 
@@ -1062,6 +1455,8 @@ export function readSvg(svg        , scale        )          {
   const stack          = []
   let text                                                                            
   let styleText                    
+  // Read first, so a fill may name a gradient defined further down.
+  const paints = gradientColors(svg)
 
   for (const m of svg.matchAll(TOKEN)) {
     const [, closing, tagName, attrSource = '', selfClosing, between] = m
@@ -1094,7 +1489,7 @@ export function readSvg(svg        , scale        )          {
     }
     const classes = (attrs.class ?? '').split(/\s+/).filter(Boolean)
     const isHidden = (parent?.hidden ?? false) || style.visibility === 'hidden' || attrs.display === 'none' ||
-      classes.some(c => hidden.has(c))
+      classes.some(c => hidden.has(c)) || NOT_DRAWN.has(tag)
     let at = parent?.at ?? { sx: scale, sy: scale, tx: 0, ty: 0 }
     if (tag === 'svg' && parent) {
       const vb = (attrs.viewBox ?? '').split(/[\s,]+/).filter(Boolean).map(Number)
@@ -1118,7 +1513,7 @@ export function readSvg(svg        , scale        )          {
 
   function label(frame       , attrs                        , words        )       {
     if (frame.hidden) return
-    const color = colorOf(frame.style.fill ?? '#000000', frame.style.color)
+    const color = colorOf(frame.style.fill ?? '#000000', frame.style.color, paints)
     if (!color || words.trim() === '') return
     const anchor = frame.style['text-anchor']
     const k = (frame.at.sx + frame.at.sy) / 2
@@ -1137,8 +1532,8 @@ export function readSvg(svg        , scale        )          {
     const k = (at.sx + at.sy) / 2
     const X = (v        ) => at.sx * v + at.tx
     const Y = (v        ) => at.sy * v + at.ty
-    const fill = colorOf(style.fill ?? (frame.tag === 'line' || frame.tag === 'polyline' ? 'none' : '#000000'), style.color)
-    const stroke = colorOf(style.stroke, style.color)
+    const fill = colorOf(style.fill ?? (frame.tag === 'line' || frame.tag === 'polyline' ? 'none' : '#000000'), style.color, paints)
+    const stroke = colorOf(style.stroke, style.color, paints)
     const fillAlpha = number(style['fill-opacity'], 1) * number(attrs.opacity, 1)
     const strokeAlpha = number(style['stroke-opacity'], 1) * number(attrs.opacity, 1)
     const half = Math.max(MIN_STROKE, number(style['stroke-width'], 1) * k) / 2
@@ -1188,6 +1583,22 @@ export function readSvg(svg        , scale        )          {
           () => fillCircle(canvas, cx, cy, r, fill , fillAlpha),
           () => strokeCircle(canvas, cx, cy, r, half, stroke , strokeAlpha),
         )
+        return
+      }
+      case 'ellipse': {
+        const cx = number(attrs.cx)
+        const cy = number(attrs.cy)
+        const rx = number(attrs.rx ?? attrs.ry)
+        const ry = number(attrs.ry ?? attrs.rx)
+        if (!(rx > 0 && ry > 0)) return
+        // As a ring of points half a dot apart, filled and stroked like a polygon.
+        const n = Math.min(512, Math.max(12, Math.ceil((2 * Math.PI * Math.max(rx * at.sx, ry * at.sy)) / 0.5)))
+        const ring          = []
+        for (let j = 0; j < n; j++) {
+          const t = (2 * Math.PI * j) / n
+          ring.push({ x: X(cx + rx * Math.cos(t)), y: Y(cy + ry * Math.sin(t)) })
+        }
+        paintBoth(() => fillPolygon(canvas, [ring], fill , fillAlpha), () => line(ring, true))
         return
       }
       case 'line': {
@@ -1815,6 +2226,71 @@ export function dotRow(names                     , options                = {}) 
     ),
     alt: names.length === 0 ? 'none' : [...counts].map(([name, c]) => `${c} ${ICONS[name].label}`).join(', '),
     twin: names.map(name => ICONS[name].glyph).join(''),
+    isInteractive: false,
+  }
+}
+
+// ---- src/statusGrid.ts
+// A grid of tiles, one per thing watched (a host, a service, a job): a status
+// dot, its name, and its figure or the status's word under it.
+
+/** The one-column glyph each status stands for in a twin: a shape as well as a colour. */
+export const STATUS_GLYPH                         = { good: '●', warning: '▲', serious: '◆', critical: '✕' }
+
+const GRID_PAD = 6
+
+/** A label cut to `room` pixels at this size, with `…` where it was cut. */
+export function fitLabel(label        , room        , size        )         {
+  const chars = [...label]
+  if (textWidth(label, size) <= room) return label
+  const keep = Math.max(1, Math.floor(room / (size * 0.58)) - 1)
+  return `${chars.slice(0, keep).join('')}…`
+}
+
+export function statusGrid(items                       , options                    = {})          {
+  const theme = pickTheme(options.theme)
+  const tile = options.tile ?? { width: 84, height: 44 }
+  const gap = options.gap ?? 6
+  const fit = Math.max(1, Math.floor(((options.width ?? 6 * (tile.width + gap) + 2 * GRID_PAD - gap) - 2 * GRID_PAD + gap) / (tile.width + gap)))
+  const columns = Math.max(1, Math.min(items.length || 1, options.columns ?? Math.min(6, fit)))
+  const rows = Math.ceil(items.length / columns)
+  const width = 2 * GRID_PAD + columns * (tile.width + gap) - gap
+  const height = 2 * GRID_PAD + Math.max(1, rows) * (tile.height + gap) - gap
+  const room = tile.width - 28
+  const parts = items.map((item, i) => {
+    const x = GRID_PAD + (i % columns) * (tile.width + gap)
+    const y = GRID_PAD + Math.floor(i / columns) * (tile.height + gap)
+    const line = item.value ?? STATUS_WORD[item.status]
+    return (
+      `<g class="status-tile" data-status="${item.status}">` +
+      `<rect x="${num(x)}" y="${num(y)}" width="${tile.width}" height="${tile.height}" rx="6" fill="${theme.grid}"/>` +
+      `<circle class="status-dot" cx="${num(x + 12)}" cy="${num(y + 14)}" r="4" fill="${theme.status[item.status]}"/>` +
+      text(x + 22, y + 18, fitLabel(item.label, room, 11), { size: 11, fill: theme.ink, cls: 'status-label' }) +
+      text(x + 22, y + 33, fitLabel(line, room, 10), { size: 10, fill: theme.muted, cls: 'status-value' }) +
+      '</g>'
+    )
+  })
+
+  const counts = (['good', 'warning', 'serious', 'critical']         )
+    .map(s => [s, items.filter(item => item.status === s)]         )
+    .filter(([, list]) => list.length > 0)
+  const name = options.label ?? 'Status'
+  const worst = [...counts].reverse().find(([s]) => s !== 'good')
+  const alt = items.length === 0
+    ? `${name}: nothing to watch yet`
+    : `${name}: ${items.length} ${items.length === 1 ? 'item' : 'items'}, ` + counts.map(([s, list]) => `${list.length} ${STATUS_WORD[s]}`).join(', ') +
+      (worst === undefined ? '' : `; ${STATUS_WORD[worst[0]]}: ${worst[1].map(item => item.label).join(', ')}`)
+  const svg = svgDoc({
+    width,
+    height,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join(''),
+  })
+  return {
+    svg: assertBudget(svg),
+    alt,
+    twin: items.map(item => `${STATUS_GLYPH[item.status]} ${item.label}`).join('  '),
     isInteractive: false,
   }
 }
