@@ -27,8 +27,11 @@ export type Cell = { ch: number; fg: number; bg: number }
 
 export type Grid = { columns: number; rows: number; cells: Cell[] }
 
-/** What a `Raster` takes, ready to spread: `<Raster {...toRaster(picture, { key })} />`. */
-export type RasterPicture = { key: string; columns: number; rows: number; cells: string }
+/** A Raster's size and cells: what the element takes beside its `key`. */
+export type RasterCells = { columns: number; rows: number; cells: string }
+
+/** The same with the `key` the mod chose, ready to spread: `<Raster {...toRaster(picture, { key })} />`. */
+export type RasterPicture = RasterCells & { key: string }
 
 export type RasterOptions = {
   /** How many cells across; `CELL_PX` CSS pixels a cell by default. */
@@ -397,8 +400,15 @@ export function ansi(grid: Grid): string {
   return lines.join('\n')
 }
 
-/** A picture as a `Raster`'s props, for the terminal: `<Raster {...toRaster(picture, { key: 'cpu' })} />`. */
-export function toRaster(picture: Picture | string, options: RasterOptions & { key: string }): RasterPicture {
+/**
+ * A picture as a `Raster`'s size and cells, for the terminal. With a `key`,
+ * the key comes back with them, so the result spreads into the element:
+ * `<Raster {...toRaster(picture, { key: 'cpu' })} />`.
+ */
+export function toRaster(picture: Picture | string, options: RasterOptions & { key: string }): RasterPicture
+export function toRaster(picture: Picture | string, options?: RasterOptions): RasterCells
+export function toRaster(picture: Picture | string, options: RasterOptions & { key?: string } = {}): RasterCells | RasterPicture {
   const grid = rasterGrid(picture, options)
-  return { key: options.key, columns: grid.columns, rows: grid.rows, cells: encodeCells(grid) }
+  const cells: RasterCells = { columns: grid.columns, rows: grid.rows, cells: encodeCells(grid) }
+  return options.key === undefined ? cells : { key: options.key, ...cells }
 }

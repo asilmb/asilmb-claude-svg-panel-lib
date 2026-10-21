@@ -9,15 +9,18 @@ type Picture = { svg: string; alt: string; twin: string; isInteractive: boolean 
 
 `svg` goes into the platform's `Svg` element on the desktop app, VS Code and mobile; `alt` is that element's required
 words; `isInteractive` is its flag. The terminal draws no `Svg`, so the library has a terminal branch:
-`toRaster(picture, { key })` turns the same picture into the props of the terminal's `Raster` element, a grid of coloured
-cells. Its shapes come out in block and braille characters, and its labels and figures in plain letters (see
+`toRaster(picture)` turns the same picture into the cells of the terminal's `Raster` element, a grid of coloured cells. Its shapes come out in block and braille characters, and its labels and figures in plain letters (see
 [On the terminal](#on-the-terminal-raster-cells)). `twin` is the picture as one line of text (a `█░│` bar for a meter,
 `▁▂▃▅▇` blocks for a sparkline, a glyph for an icon), for a status line or a log.
+
+The library only makes these forms. It never calls `$`, creates an element or looks at the surface, so each mod decides
+which form it shows, on which surface, at what size and in which theme. [API.md](API.md) lists every export.
 
 ES module TypeScript, no DOM, no Node APIs, no runtime packages. Every string that reaches the markup is escaped, every
 picture is checked against the `Svg` size limit, and every colour comes from one `Theme` with a dark and a light set.
 
 - `src/`: the library
+- `API.md`: the reference for every export
 - `examples/demo-mod/`: a service monitor in a pane, with every component, redrawn from atoms, as Rasters on the terminal
 - `demo/index.html`: every component in both themes, driven by an event simulator. It opens from a double click.
 
@@ -234,7 +237,8 @@ a background colour. `toRaster` draws any picture into one, in the same way as
 4. **Letters.** Each `<text>` is set in plain letters on the row and in the columns its anchor gives, over the cells it
    falls on. So `236k`, `300k` or `60k left` stay sharp instead of turning into dots.
 
-The result is the `Raster`'s props. Claude Code paints them in whatever terminal it runs in, such as Windows Terminal.
+The result is the `Raster`'s `columns`, `rows` and `cells`, plus its `key` if you pass one. Claude Code paints them in
+whatever terminal it runs in, such as Windows Terminal.
 
 ```tsx
 const throughput = gauge({ value: 236e3, max: 300e3, threshold: 270e3, label: 'Tokens' })
@@ -272,6 +276,8 @@ The pieces are exported too:
 - `fitCell` is the per-cell choice, and `readSvg` is the dot painter.
 
 ### Helpers
+
+[API.md](API.md) describes each of these in full.
 
 - `esc` escapes `& < > "`.
 - `assertBudget` throws past 131072 characters (`SVG_BUDGET`).

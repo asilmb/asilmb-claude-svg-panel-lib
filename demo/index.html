@@ -1390,7 +1390,9 @@ const RASTER_MAX = { columns: 512, rows: 256 }
 
 /** One cell: a code point, and a foreground and a background as `0xRRGGBB` or `DEFAULT_COLOR`. */
 
-/** What a `Raster` takes, ready to spread: `<Raster {...toRaster(picture, { key })} />`. */
+/** A Raster's size and cells: what the element takes beside its `key`. */
+
+/** The same with the `key` the mod chose, ready to spread: `<Raster {...toRaster(picture, { key })} />`. */
 
 // A cell's eight dots are numbered row by row: bit `row * 2 + column`.
 
@@ -1748,10 +1750,16 @@ function ansi(grid      )         {
   return lines.join('\n')
 }
 
-/** A picture as a `Raster`'s props, for the terminal: `<Raster {...toRaster(picture, { key: 'cpu' })} />`. */
-function toRaster(picture                  , options                                 )                {
+/**
+ * A picture as a `Raster`'s size and cells, for the terminal. With a `key`,
+ * the key comes back with them, so the result spreads into the element:
+ * `<Raster {...toRaster(picture, { key: 'cpu' })} />`.
+ */
+
+function toRaster(picture                  , options                                   = {})                              {
   const grid = rasterGrid(picture, options)
-  return { key: options.key, columns: grid.columns, rows: grid.rows, cells: encodeCells(grid) }
+  const cells              = { columns: grid.columns, rows: grid.rows, cells: encodeCells(grid) }
+  return options.key === undefined ? cells : { key: options.key, ...cells }
 }
 
 // ---- src/sparkline.ts

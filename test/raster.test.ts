@@ -212,10 +212,13 @@ test('a picture taller than a Raster may be is scaled to fit it', () => {
   assert.ok(g.rows <= 256 && g.rows >= 255, `${g.rows} rows`)
 })
 
-test('toRaster gives a Raster its props, ready to spread', () => {
+test('toRaster gives a Raster its size and cells, and the key when the mod names one', () => {
   const p = gauge({ value: 1, max: 2 })
   const r = toRaster(p, { key: 'g' })
   assert.deepEqual(Object.keys(r), ['key', 'columns', 'rows', 'cells'])
+  // Without a key, only what the cells are: the mod names the element.
+  assert.deepEqual(Object.keys(toRaster(p)), ['columns', 'rows', 'cells'])
+  assert.equal(toRaster(p).cells, r.cells)
   assert.deepEqual(decodeCells(r.cells, r.columns, r.rows), rasterGrid(p))
   assert.match(ansi(rasterGrid(p)), /^\x1b\[38;2;26;26;25m\x1b\[48;2;26;26;25m /)
 })
