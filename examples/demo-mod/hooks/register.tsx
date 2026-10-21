@@ -44,9 +44,13 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'svg-panel' }, async $ => {
-    await $.ui.open({ id: PANE, title: 'svg-panel' })
+    const opened = await $.ui.open({ id: PANE, title: 'svg-panel' })
 
-    return { text: 'svg-panel demo pane opened.' }
+    return {
+      text: opened.isPlaced
+        ? 'svg-panel demo pane opened.'
+        : `svg-panel demo pane is open but not drawn here: ${opened.reason}`,
+    }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
