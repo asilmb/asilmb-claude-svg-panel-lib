@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>svg-panel demo</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f9f9f7; --card: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --line: rgba(11, 11, 11, .10); --accent: #2a78d6; --term: #f0efec; --term-ink: #0b0b0b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #0d0d0d; --card: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+      --line: rgba(255, 255, 255, .10); --accent: #3987e5; --term: #000; --term-ink: #e6e5e0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page: #0d0d0d; --card: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --line: rgba(255, 255, 255, .10); --accent: #3987e5; --term: #000; --term-ink: #e6e5e0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  header, main { max-width: 1240px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 small { font-weight: 400; color: var(--ink2); font-size: 14px; margin-left: 8px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  h3 { font-size: 13px; margin: 0 0 6px; color: var(--ink2); font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  button {
+    font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .sim { display: grid; gap: 12px; margin-bottom: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .row .label { color: var(--muted); font-size: 12px; min-width: 64px; }
+  .glyph { font-weight: 700; }
+  pre {
+    margin: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .log { max-height: 128px; overflow: auto; color: var(--ink2); }
+  .themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 16px; }
+  .theme { border-radius: 12px; padding: 14px; border: 1px solid var(--line); min-width: 0; }
+  .theme.dark { background: #0d0d0d; --twin: #c3c2b7; --h: #898781; }
+  .theme.light { background: #f9f9f7; --twin: #52514e; --h: #898781; }
+  .theme > h2 { color: var(--h); }
+  .component { margin: 0 0 16px; }
+  .component h3 { color: var(--h); }
+  .pics { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+  .pics img, .pics iframe { display: block; max-width: 100%; height: auto; border: 0; }
+  .twin { color: var(--twin); margin-top: 6px; }
+  .terminal { background: var(--term); color: var(--term-ink); border-radius: 10px; padding: 12px 14px; }
+  .terminal .t-success { color: #0ca30c; } .terminal .t-warning { color: #fab219; } .terminal .t-error { color: #d03b3b; }
+  .terminal .t-subtle { color: #898781; } .terminal .t-claude { color: #d95926; } .terminal .t-merged { color: #9085e9; }
+  .terminal .t-suggestion { color: #3987e5; }
+  .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>svg-panel <small>a service monitor: every picture, its twin, and the events that redraw it</small></h1>
+  <div class="row">
+    <span class="label">pictures</span>
+    <div class="seg" role="group" aria-label="Which themes to show">
+      <button data-show="both" aria-pressed="true">dark + light</button>
+      <button data-show="dark" aria-pressed="false">dark</button>
+      <button data-show="light" aria-pressed="false">light</button>
+    </div>
+  </div>
+</header>
+<main>
+  <section class="panel sim" aria-label="Event simulator">
+    <h2>Simulator: sends the events the demo mod's buttons and timer send</h2>
+    <div class="row">
+      <span class="label">measure</span>
+      <button class="primary" id="measure">+ sample</button>
+      <button id="play" aria-pressed="false">live</button>
+    </div>
+    <div class="row">
+      <span class="label">marker</span>
+      <button id="deploy">deploy</button>
+      <button id="incident">incident</button>
+    </div>
+    <div class="row" id="hosts"><span class="label">status</span></div>
+    <div class="row">
+      <span class="label">state</span>
+      <button id="reset">reset</button>
+      <button id="reseed">reseed</button>
+    </div>
+    <div>
+      <h2>Last events</h2>
+      <pre class="log" id="log"></pre>
+    </div>
+  </section>
+
+  <div class="themes" id="themes"></div>
+
+  <section class="panel" style="margin-top:16px">
+    <h2>Terminal: the twins, as the demo mod prints them</h2>
+    <pre class="terminal" id="terminal"></pre>
+    <p class="note">The terminal draws no Svg element, so the mod's pane prints each picture's twin in a Text instead.</p>
+  </section>
+</main>
+
+<script>
+/* svg-panel and scene inlined here by scripts/build.mjs */
+
+;(function () {
+  'use strict'
+  let state = seed()
+  let show = 'both'
+  let timer = null
+  const log = []
+
+  function send(ev) {
+    state = apply(state, ev)
+    log.unshift(JSON.stringify(ev))
+    log.length = Math.min(log.length, 8)
+    render()
+  }
+
+  function size(svg) {
+    const root = /^<svg\b[^>]*>/.exec(svg)[0]
+    return { w: /\swidth="([\d.]+)"/.exec(root)[1], h: /\sheight="([\d.]+)"/.exec(root)[1] }
+  }
+
+  // As the app draws an Svg: an image, or a script-less sandboxed frame when interactive.
+  function picture(p) {
+    const { w, h } = size(p.svg)
+    if (p.isInteractive) {
+      const frame = document.createElement('iframe')
+      frame.setAttribute('sandbox', '')
+      frame.title = p.alt
+      frame.width = w
+      frame.height = h
+      frame.style.aspectRatio = `${w} / ${h}`
+      frame.srcdoc = '<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent;overflow:hidden}svg{display:block}</style>' + p.svg
+      return frame
+    }
+    const img = document.createElement('img')
+    img.alt = p.alt
+    img.width = Number(w)
+    img.height = Number(h)
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(p.svg)
+    return img
+  }
+
+  function component(name, pictures, twin) {
+    const section = document.createElement('section')
+    section.className = 'component'
+    const title = document.createElement('h3')
+    title.textContent = name
+    const pics = document.createElement('div')
+    pics.className = 'pics'
+    for (const p of pictures) pics.append(picture(p))
+    const pre = document.createElement('pre')
+    pre.className = 'twin'
+    pre.textContent = twin
+    section.append(title, pics, pre)
+    return section
+  }
+
+  function column(themeName) {
+    const s = draw(state, themeName)
+    const col = document.createElement('section')
+    col.className = `theme ${themeName}`
+    col.setAttribute('aria-label', `${themeName} theme`)
+    const h = document.createElement('h2')
+    h.textContent = `${themeName} theme`
+    col.append(
+      h,
+      component('gauge', [s.throughput, s.latency], `${s.throughput.twin}\n${s.latency.twin}`),
+      component('statTile', s.tiles, s.tiles.map(t => t.twin).join('\n')),
+      component('timeline · interactive, hover a sample', [s.requests], s.requests.twin),
+      component('meter', s.meters, s.meters.map(m => m.twin).join('\n')),
+      component('sparkline', [s.sparkline], `Latency p95 ${s.sparkline.twin}`),
+      component('icon', [...s.hosts, ...s.icons], `${s.hosts.map(h => `${h.glyph} ${h.alt}`).join('   ')}\n${s.icons.map(i => `${i.glyph} ${i.alt}`).join('   ')}`),
+      component('legend', [s.legend], s.legend.twin),
+    )
+    return col
+  }
+
+  function esc(t) {
+    return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  }
+
+  function terminal() {
+    const s = draw(state, 'dark')
+    const hosts = s.hosts.map((h, i) => `[ <span class="t-${h.textColor}">${h.glyph}</span> ${HOST_NAMES[i]} ]`).join(' ')
+    return [
+      `<span class="t-${s.statusColor}">●</span> ${esc(s.throughput.twin)}`,
+      esc(s.latency.twin),
+      '',
+      esc(s.requests.twin),
+      '',
+      ...s.tiles.map(t => esc(t.twin)),
+      '',
+      ...s.meters.map(m => esc(m.twin)),
+      `Latency p95 ${esc(s.sparkline.twin)}`,
+      '',
+      hosts,
+      `<span class="t-subtle">${esc(s.legend.twin)}</span>`,
+      '',
+      `[ + sample ] [ deploy ] [ incident ] [ ${timer ? 'pause' : 'live'} ] [ reset ]`,
+    ].join('\n')
+  }
+
+  function render() {
+    const themes = document.getElementById('themes')
+    themes.replaceChildren(...(show === 'both' ? ['dark', 'light'] : [show]).map(column))
+    document.getElementById('terminal').innerHTML = terminal()
+    document.getElementById('log').textContent = log.join('\n') || '(none yet: the pictures start from a seeded history)'
+    hostButtons()
+  }
+
+  document.getElementById('measure').onclick = () => send(simulateMeasure(state))
+  document.getElementById('deploy').onclick = () => send({ event: 'marker', kind: 'deploy' })
+  document.getElementById('incident').onclick = () => send({ event: 'marker', kind: 'incident' })
+  document.getElementById('reset').onclick = () => send({ event: 'reset' })
+  document.getElementById('reseed').onclick = () => { state = seed(); log.length = 0; render() }
+  document.getElementById('play').onclick = event => {
+    const button = event.currentTarget
+    if (timer) {
+      clearInterval(timer)
+      timer = null
+    } else {
+      timer = setInterval(() => send(simulateMeasure(state)), 900)
+    }
+    button.setAttribute('aria-pressed', String(Boolean(timer)))
+    button.textContent = timer ? 'pause' : 'live'
+    render()
+  }
+  const hostsRow = document.getElementById('hosts')
+  function hostButtons() {
+    hostsRow.querySelectorAll('button').forEach(b => b.remove())
+    state.hosts.forEach((status, i) => {
+      const b = document.createElement('button')
+      const g = document.createElement('span')
+      g.className = 'glyph'
+      g.style.color = ICONS[status].color(dark)
+      g.textContent = ICONS[status].glyph
+      b.append(g, ` ${HOST_NAMES[i]}`)
+      b.title = `${HOST_NAMES[i]} is ${status}; press for ${nextStatus(status)}`
+      b.onclick = () => send({ event: 'status', host: i, status: nextStatus(status) })
+      hostsRow.append(b)
+    })
+  }
+  for (const b of document.querySelectorAll('[data-show]')) {
+    b.onclick = () => {
+      show = b.dataset.show
+      for (const o of document.querySelectorAll('[data-show]')) o.setAttribute('aria-pressed', String(o === b))
+      render()
+    }
+  }
+  render()
+})()
+</script>
+</body>
+</html>

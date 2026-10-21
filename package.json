@@ -1,0 +1,22 @@
+{
+  "name": "svg-panel",
+  "version": "0.1.0",
+  "description": "SVG pictures with plain-text twins for Claude Code mod panels: gauge, meter, sparkline, timeline, stat tile, icon, legend.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./dist": "./dist/svg-panel.js"
+  },
+  "files": ["src", "dist", "LICENSE"],
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "typecheck": "tsc -p . && tsc -p examples/demo-mod/tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "test:mod": "claude plugin test examples/demo-mod",
+    "validate:mod": "claude plugin validate examples/demo-mod",
+    "mutate": "node scripts/mutate.mjs",
+    "build": "node scripts/build.mjs",
+    "check": "npm run build && npm run typecheck && npm test && npm run mutate && npm run validate:mod && npm run test:mod"
+  }
+}

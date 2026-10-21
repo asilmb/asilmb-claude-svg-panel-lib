@@ -1,0 +1,202 @@
+// A small service watched from a pane: its state, the events that change it
+// and the pictures drawn from it. Pure, so the mod and demo/index.html run the
+// same code, and the page's simulator sends the events the mod's buttons and
+// timer send.
+
+import type { DemoHost, DemoMarker, DemoSample, DemoState } from '../types'
+import {
+  dotRow,
+  gauge,
+  icon,
+  ICON_NAMES,
+  ICONS,
+  legend,
+  meter,
+  sparkline,
+  STATUS_TEXT_COLOR,
+  statTile,
+  statusOf,
+  themes,
+  timeline,
+  zoneOf,
+  type IconName,
+  type IconPicture,
+  type Picture,
+  type Status,
+  type Zone,
+} from '../vendor/svg-panel/index.ts'
+
+export type DemoEvent =
+  /** A new measurement: the live timer's tick, or the `+ sample` button. */
+  | { event: 'measure'; sample: DemoSample }
+  /** A marker on the chart: a deploy warms up, an incident slows things down. */
+  | { event: 'marker'; kind: DemoMarker }
+  /** One host changes state. */
+  | { event: 'status'; host: number; status: DemoHost }
+  | { event: 'reset' }
+
+/** Samples kept; older ones fall off the left. */
+export const MAX_SAMPLES = 240
+/** The requests per second the service is built for, and where the redline starts. */
+export const CAPACITY = 2000
+export const REDLINE = 1600
+/** The latency the service promises, in milliseconds. */
+export const SLO_MS = 250
+
+export const HOST_NAMES = ['web-1', 'web-2', 'web-3', 'api-1', 'api-2', 'batch']
+const HOST_CYCLE: DemoHost[] = ['online', 'idle', 'offline', 'failed']
+
+export const EMPTY: DemoState = {
+  samples: [],
+  markers: [],
+  hosts: ['online', 'online', 'online', 'online', 'online', 'online'],
+  incident: 0,
+  warmup: 0,
+}
+
+export function apply(state: DemoState, ev: DemoEvent): DemoState {
+  switch (ev.event) {
+    case 'measure': {
+      const drop = Math.max(0, state.samples.length + 1 - MAX_SAMPLES)
+      return {
+        ...state,
+        samples: [...state.samples.slice(drop), ev.sample],
+        markers: state.markers.map(m => ({ ...m, step: m.step - drop })).filter(m => m.step >= 0),
+        incident: Math.max(0, state.incident - 1),
+        warmup: Math.max(0, state.warmup - 1),
+      }
+    }
+    case 'marker': {
+      const step = state.samples.length - 1
+      if (step < 0) return state
+      const markers = [...state.markers, { step, kind: ev.kind }]
+      return ev.kind === 'deploy' ? { ...state, markers, warmup: 3 } : { ...state, markers, incident: 6 }
+    }
+    case 'status': {
+      if (!(ev.host >= 0 && ev.host < state.hosts.length)) return state
+      return { ...state, hosts: state.hosts.map((h, i) => (i === ev.host ? ev.status : h)) }
+    }
+    case 'reset':
+      return EMPTY
+  }
+}
+
+/** The status a host goes to when its button is pressed. */
+export function nextStatus(status: DemoHost): DemoHost {
+  return HOST_CYCLE[(HOST_CYCLE.indexOf(status) + 1) % HOST_CYCLE.length] ?? 'online'
+}
+
+/** A repeatable stand-in for noise: 0 to 1, from the step and a channel. */
+function noise(step: number, channel: number): number {
+  const x = Math.sin(step * 12.9898 + channel * 78.233) * 43758.5453
+  return x - Math.floor(x)
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10
+
+/** The next measurement: traffic on a slow wave, shaped by the hosts, a deploy or an incident. */
+export function simulateMeasure(state: DemoState): DemoEvent {
+  const i = state.samples.length
+  const up = state.hosts.filter(h => h === 'online').length + 0.5 * state.hosts.filter(h => h === 'idle').length
+  const failed = state.hosts.filter(h => h === 'failed').length
+  const rps = Math.max(0, Math.min(CAPACITY,
+    1050 + 420 * Math.sin(i / 6) + 160 * noise(i, 1) - (state.incident > 0 ? 260 : 0) - (state.warmup > 0 ? 140 : 0)))
+  const cpu = Math.min(100, (rps / (Math.max(1, up) * 400)) * 85 + 8 * noise(i, 2))
+  const p95 = 70 + cpu * 1.3 + 30 * noise(i, 3) + (state.incident > 0 ? 210 : 0) + (state.warmup > 0 ? 60 : 0)
+  const mem = 46 + (i % 48) * 0.7 + 4 * noise(i, 4)
+  const errors = 0.2 + 0.4 * noise(i, 5) + (state.incident > 0 ? 3.2 : 0) + failed * 0.9
+  return {
+    event: 'measure',
+    sample: { rps: Math.round(rps), p95: Math.round(p95), cpu: round1(cpu), mem: round1(mem), errors: round1(errors) },
+  }
+}
+
+/** A history to start from, so every picture has something to show. */
+export function seed(): DemoState {
+  let state = apply(apply(EMPTY, { event: 'status', host: 3, status: 'idle' }), { event: 'status', host: 5, status: 'offline' })
+  for (let i = 0; i < 40; i++) {
+    state = apply(state, simulateMeasure(state))
+    if (i === 11) state = apply(state, { event: 'marker', kind: 'deploy' })
+    if (i === 25) state = apply(state, { event: 'marker', kind: 'incident' })
+  }
+  return state
+}
+
+export type Scene = {
+  status: Status
+  /** The theme key for a `Text` beside the status. */
+  statusColor: 'success' | 'warning' | 'error'
+  throughput: Picture
+  latency: Picture
+  tiles: Picture[]
+  requests: Picture
+  meters: Picture[]
+  sparkline: Picture
+  hosts: IconPicture[]
+  legend: Picture
+  icons: IconPicture[]
+}
+
+const PERCENT_ZONES: Zone[] = [
+  { upTo: 70, status: 'good' },
+  { upTo: 85, status: 'warning' },
+  { upTo: 100, status: 'critical' },
+]
+const ERROR_ZONES: Zone[] = [
+  { upTo: 1, status: 'good' },
+  { upTo: 3, status: 'warning' },
+  { upTo: 10, status: 'critical' },
+]
+
+const ms = (n: number) => `${Math.round(n)} ms`
+const pct = (n: number) => `${Math.round(n)}%`
+const pct1 = (n: number) => `${n.toFixed(1)}%`
+const whole = (n: number) => String(Math.round(n))
+
+export function draw(state: DemoState, themeName: 'dark' | 'light'): Scene {
+  const theme = themes[themeName]
+  const last: DemoSample = state.samples[state.samples.length - 1] ?? { rps: 0, p95: 0, cpu: 0, mem: 0, errors: 0 }
+  const before = state.samples[state.samples.length - 2]
+  const rps = state.samples.map(s => s.rps)
+  const throughput = gauge(
+    { value: last.rps, max: CAPACITY, threshold: REDLINE, label: 'Throughput' },
+    { theme, format: whole },
+  )
+  const status = statusOf(last.rps, CAPACITY, REDLINE)
+  const online = state.hosts.filter(h => h === 'online').length
+  const errorStatus = zoneOf(last.errors, ERROR_ZONES)?.status ?? 'good'
+  const trend: IconName = before !== undefined && last.rps < before.rps ? 'falling' : 'rising'
+  const kinds = {
+    deploy: { label: 'deploy', shape: 'diamond', color: theme.series.aqua },
+    incident: { label: 'incident', shape: 'square', color: theme.series.orange },
+  } as const
+
+  return {
+    status,
+    statusColor: STATUS_TEXT_COLOR[status],
+    throughput,
+    latency: gauge({ value: last.p95, max: 600, threshold: 300, label: 'Latency p95' }, { theme, format: ms }),
+    tiles: [
+      statTile({ label: 'Requests/s', value: whole(last.rps), body: sparkline(rps, { theme, width: 176, last: 30, label: 'Requests/s, last 30 samples', format: whole }) }, { theme }),
+      statTile({ label: 'Hosts', value: `${online}/${state.hosts.length}`, unit: 'online', body: dotRow(state.hosts, { theme }) }, { theme }),
+      statTile(
+        { label: 'Errors', value: pct1(last.errors), status: errorStatus, body: meter({ value: last.errors, max: 10, zones: ERROR_ZONES }, { theme, width: 176, showText: false, format: pct1 }) },
+        { theme },
+      ),
+      statTile({ label: 'Trend', value: ICONS[trend].label, body: icon(trend, { theme, r: 10, label: `traffic ${ICONS[trend].label}` }) }, { theme }),
+    ],
+    requests: timeline(
+      { values: rps, events: state.markers, threshold: REDLINE, thresholdLabel: `redline ${REDLINE}` },
+      { theme, kinds, seriesLabel: 'requests/s', stepName: s => `#${s + 1}`, format: whole, width: 440, max: CAPACITY },
+    ),
+    meters: [
+      meter({ value: last.cpu, max: 100, zones: PERCENT_ZONES, tick: 85, label: 'CPU' }, { theme, width: 260, format: pct }),
+      meter({ value: last.mem, max: 100, zones: PERCENT_ZONES, tick: 85, label: 'Memory' }, { theme, width: 260, format: pct }),
+      meter({ value: last.errors, max: 10, zones: ERROR_ZONES, tick: 3, label: 'Errors' }, { theme, width: 260, format: pct1 }),
+    ],
+    sparkline: sparkline(state.samples.map(s => s.p95), { theme, width: 200, height: 40, last: 30, reference: SLO_MS, label: 'Latency p95, last 30 samples', format: ms }),
+    hosts: state.hosts.map((h, i) => icon(h, { theme, r: 9, label: `${HOST_NAMES[i] ?? `host ${i + 1}`} ${h}` })),
+    legend: legend(ICON_NAMES.map(name => ({ label: ICONS[name].label, mark: { icon: name } })), { theme, width: 300 }),
+    icons: ICON_NAMES.map(name => icon(name, { theme, r: 9 })),
+  }
+}

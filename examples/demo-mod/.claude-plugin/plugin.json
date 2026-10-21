@@ -1,0 +1,8 @@
+{
+  "name": "svg-panel-demo",
+  "version": "0.1.0",
+  "description": "A pane that shows every svg-panel picture (gauge, meter, sparkline, timeline, stat tiles, icons, legend), redrawn from atoms, with plain-text twins on the terminal.",
+  "author": { "name": "svg-panel" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

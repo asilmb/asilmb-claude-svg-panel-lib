@@ -1,0 +1,18 @@
+// Copied from svg-panel's src/index.ts by scripts/build.mjs: edit src/, then rebuild.
+
+// svg-panel: pictures for Claude Code mod panels. Every component is
+// `(data, options) => Picture`: `svg` for an `Svg` element, `alt` for its
+// required words, `twin` for the terminal, `isInteractive` for its flag.
+
+export { abbreviate, assertBudget, esc, extent, FONT, num, SVG_BUDGET, svgDoc, text, textWidth, type Picture } from './core.ts'
+export { arcPath, linePath, niceMax, polar, scale, type Point, type Scale } from './geom.ts'
+export { dark, light, pickTheme, STATUS_TEXT_COLOR, STATUS_WORD, themes, type Status, type Theme } from './theme.ts'
+export { BAR_EMPTY, BAR_FULL, BAR_TICK, bar, BLOCKS, blocks, thin } from './twin.ts'
+export { marker, SHAPE_GLYPH, type Shape } from './marks.ts'
+export { gauge, GAUGE_ARC, GAUGE_SIZE, GAUGE_SWEEP, gaugeAngle, statusOf, type GaugeData, type GaugeOptions } from './gauge.ts'
+export { meter, METER_PAD, METER_TRACK, zoneOf, type MeterData, type MeterOptions, type Zone } from './meter.ts'
+export { SPARK_PAD, sparkline, sparkPoints, type SparklineOptions } from './sparkline.ts'
+export { timeline, type EventKind, type TimelineData, type TimelineEvent, type TimelineOptions } from './timeline.ts'
+export { dotRow, place, statTile, svgSize, type DotRowOptions, type StatTileData, type StatTileOptions } from './statTile.ts'
+export { icon, ICON_NAMES, iconMark, ICONS, type IconName, type IconOptions, type IconPicture, type IconTextColor } from './icon.ts'
+export { legend, legendMarkup, legendTwin, type LegendItem, type LegendOptions } from './legend.ts'
