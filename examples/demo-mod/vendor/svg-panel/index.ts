@@ -16,3 +16,26 @@ export { timeline, type EventKind, type TimelineData, type TimelineEvent, type T
 export { dotRow, place, statTile, svgSize, type DotRowOptions, type StatTileData, type StatTileOptions } from './statTile.ts'
 export { icon, ICON_NAMES, iconMark, ICONS, type IconName, type IconOptions, type IconPicture, type IconTextColor } from './icon.ts'
 export { legend, legendMarkup, legendTwin, type LegendItem, type LegendOptions } from './legend.ts'
+export { dash, dots, fillCircle, fillPolygon, fillRoundRect, hexRgb, strokeCircle, strokePolyline, strokeRoundRect, type Cap, type Dots, type Rgb } from './dots.ts'
+export { arcPoints, hiddenClasses, MIN_STROKE, pathPoints, readSvg, snapLine, type Label, type Painted } from './readSvg.ts'
+export {
+  ansi,
+  BLOCK_GLYPHS,
+  BRAILLE_INK,
+  brailleOf,
+  CELL_PX,
+  cellChars,
+  decodeCells,
+  DEFAULT_COLOR,
+  encodeCells,
+  fitCell,
+  gridText,
+  packRgb,
+  RASTER_MAX,
+  rasterGrid,
+  toRaster,
+  type Cell,
+  type Grid,
+  type RasterOptions,
+  type RasterPicture,
+} from './raster.ts'

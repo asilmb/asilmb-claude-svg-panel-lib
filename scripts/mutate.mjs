@@ -32,6 +32,19 @@ const MUTANTS = [
   ['size budget', 'src/core.ts', 'if (svg.length > SVG_BUDGET) {', 'if (svg.length > SVG_BUDGET + 10) {'],
   ['bar tick', 'src/twin.ts', 'Math.round(at(tick) * cells)', 'Math.floor(at(tick) * cells)'],
   ['blocks', 'src/twin.ts', 'Math.round(clamp((v - lo) / (hi - lo), 0, 1) * top)', 'Math.floor(clamp((v - lo) / (hi - lo), 0, 1) * top)'],
+  ['raster half block', 'src/raster.ts', "0x0f: '▀',", "0x0f: '▄',"],
+  ['raster braille order', 'src/raster.ts', 'const BRAILLE_BIT = [0x01, 0x08, 0x02, 0x10', 'const BRAILLE_BIT = [0x01, 0x02, 0x08, 0x10'],
+  ['raster braille edge', 'src/raster.ts', 'const BRAILLE_EDGE = { ratio: 0.8, least: 64 }', 'const BRAILLE_EDGE = { ratio: 0, least: 64 }'],
+  ['raster surface behind', 'src/raster.ts', 'distance2(IN, backdrop) < distance2(OUT, backdrop)', 'distance2(IN, backdrop) > distance2(OUT, backdrop)'],
+  ['raster label anchor', 'src/raster.ts', "label.anchor === 'middle' ? Math.round(at - chars.length / 2)", "label.anchor === 'middle' ? Math.round(at)"],
+  ['raster wide chars', 'src/raster.ts', 'else if (cp > 0xffff || within(cp, WIDE)) out.push(0x3f)', 'else if (cp > 0xffff) out.push(0x3f)'],
+  ['raster bare cells', 'src/raster.ts', 'if (most < 0.02) {', 'if (most < -1) {'],
+  ['raster encoding', 'src/raster.ts', 'bytes[o] = word & 255', 'bytes[o] = (word >>> 24) & 255'],
+  ['raster hidden css', 'src/readSvg.ts', 'if (m) out.add(m[1]!)', 'if (m) out.add(`.${m[1]!}`)'],
+  ['raster arc sweep', 'src/readSvg.ts', 'if (sweep && delta < 0) delta += 2 * Math.PI', 'if (sweep && delta < 0) delta -= 0'],
+  ['raster hairline', 'src/readSvg.ts', 'export const MIN_STROKE = 1', 'export const MIN_STROKE = 0.25'],
+  ['raster rect snap', 'src/readSvg.ts', 'const y = Math.round(Y(number(attrs.y)))', 'const y = Y(number(attrs.y))'],
+  ['raster soft edge', 'src/dots.ts', 'return clamp(0.5 - sd, 0, 1)', 'return sd < 0 ? 1 : 0'],
 ]
 
 const survivors = []

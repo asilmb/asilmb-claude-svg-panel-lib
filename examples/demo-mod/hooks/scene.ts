@@ -1,7 +1,8 @@
 // A small service watched from a pane: its state, the events that change it
-// and the pictures drawn from it. Pure, so the mod and demo/index.html run the
-// same code, and the page's simulator sends the events the mod's buttons and
-// timer send.
+// and the pictures drawn from it, as Svg markup for the apps and as Raster
+// cells for the terminal. Pure, so the mod and demo/index.html run the same
+// code, and the page's simulator sends the events the mod's buttons and timer
+// send.
 
 import type { DemoHost, DemoMarker, DemoSample, DemoState } from '../types'
 import {
@@ -18,10 +19,12 @@ import {
   statusOf,
   themes,
   timeline,
+  toRaster,
   zoneOf,
   type IconName,
   type IconPicture,
   type Picture,
+  type RasterPicture,
   type Status,
   type Zone,
 } from '../vendor/svg-panel/index.ts'
@@ -198,5 +201,32 @@ export function draw(state: DemoState, themeName: 'dark' | 'light'): Scene {
     hosts: state.hosts.map((h, i) => icon(h, { theme, r: 9, label: `${HOST_NAMES[i] ?? `host ${i + 1}`} ${h}` })),
     legend: legend(ICON_NAMES.map(name => ({ label: ICONS[name].label, mark: { icon: name } })), { theme, width: 300 }),
     icons: ICON_NAMES.map(name => icon(name, { theme, r: 9 })),
+  }
+}
+
+export type TerminalScene = {
+  gauges: RasterPicture[]
+  requests: RasterPicture
+  tiles: RasterPicture[]
+  meters: RasterPicture[]
+  sparkline: RasterPicture
+}
+
+/** How wide the requests chart is drawn on the terminal, in cells, when the pane has room. */
+export const CHART_COLUMNS = 55
+
+/**
+ * The scene's pictures as Raster props, for the terminal, which draws no Svg:
+ * the same shapes on dots, the labels in letters. `columns` is the pane's
+ * body width; the chart narrows to it.
+ */
+export function rasterize(scene: Scene, themeName: 'dark' | 'light', columns: number): TerminalScene {
+  const cells = (key: string, picture: Picture, width?: number) => toRaster(picture, { key, theme: themeName, columns: width })
+  return {
+    gauges: [cells('throughput', scene.throughput), cells('latency', scene.latency)],
+    requests: cells('requests', scene.requests, Math.max(1, Math.min(CHART_COLUMNS, columns))),
+    tiles: scene.tiles.map((tile, i) => cells(`tile-${i}`, tile)),
+    meters: scene.meters.map((m, i) => cells(`meter-${i}`, m)),
+    sparkline: cells('latency-trend', scene.sparkline),
   }
 }

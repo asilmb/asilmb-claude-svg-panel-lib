@@ -25,5 +25,6 @@ test('dist/svg-panel.js draws what src/ draws', () => {
     assert.equal(b.svg, a.svg, `${name} svg`)
     assert.equal(b.twin, a.twin, `${name} twin`)
     assert.equal(b.alt, a.alt, `${name} alt`)
+    assert.equal(dist.toRaster(b, { key: name }).cells, src.toRaster(a, { key: name }).cells, `${name} raster`)
   }
 })

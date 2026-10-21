@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { decodeCells, gridText } from '../vendor/svg-panel/index.ts'
+
 const PANE = {
   plugin: 'svg-panel-demo',
   component: 'Pane',
@@ -17,6 +19,14 @@ const PANE = {
 const APPS = ['desktop', 'vscode', 'mobile'] as const
 
 type Mounted = { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }
+
+/** The letters a mounted Raster shows, a line a row: its labels among the block and braille cells. */
+async function rasterText(ui: Mounted, key: string): Promise<string> {
+  const found = (await ui.findAll({ type: 'Raster' })).find(r => r.props.key === key)
+  if (!found) return ''
+  const { cells, columns, rows } = found.props as { cells: string; columns: number; rows: number }
+  return gridText(decodeCells(cells, columns, rows))
+}
 
 /** An Svg takes no key: a picture is found by what its alt says. */
 async function svg(ui: Mounted, alt: RegExp) {
@@ -40,13 +50,29 @@ test('the apps draw every picture as an Svg with its alt', async $ => {
   }
 })
 
-test('the terminal prints the twins, and no Svg', async $ => {
+test('the terminal draws the pictures as Rasters, with their labels in letters', async $ => {
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
-  expect((await ui.find({ type: 'Text', text: /^Throughput / }))?.text).toBe('Throughput 1182 / 2000 ████████████░░░░│░░░ ok')
-  expect(await ui.find({ type: 'Text', text: /◆ deploy ×1 \(#12\) · ■ incident ×1 \(#26\)/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'Hosts 4/6 online  ●●●◐●○' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^Memory ███████████████░░│░░ 74% \/ 100% warning$/ })).toBeDefined()
+  const rasters = await ui.findAll({ type: 'Raster' })
+  // two gauges, the chart, four tiles, three meters, a sparkline
+  expect(rasters.map(r => r.props.key)).toEqual([
+    'throughput', 'latency', 'requests', 'tile-0', 'tile-1', 'tile-2', 'tile-3', 'meter-0', 'meter-1', 'meter-2', 'latency-trend',
+  ])
+  for (const r of rasters) {
+    const { cells, columns, rows } = r.props as { cells: string; columns: number; rows: number }
+    expect(columns).toBeLessThanOrEqual(PANE.props.bodyColumns)
+    expect(decodeCells(cells, columns, rows).cells).toHaveLength(columns * rows)
+  }
+  expect(rasters[0]?.props).toMatchObject({ columns: 29, rows: 11 })
+  const gauge = await rasterText(ui, 'throughput')
+  for (const words of ['1182', 'of 2000', '1600', ' 0 ', 'ok']) expect(gauge).toContain(words)
+  expect(gauge).toMatch(/[▀▄▌▐▖▗▘▝▚▞▙▛▜▟█]/)
+  const chart = await rasterText(ui, 'requests')
+  for (const words of ['requests/s', 'deploy', 'incident', 'redline 1600', '#40']) expect(chart).toContain(words)
+  // The hover tooltips are hidden by the picture's CSS, and stay hidden here.
+  expect(chart).not.toContain('#1 ·')
+  expect(await rasterText(ui, 'tile-1')).toMatch(/Hosts[\s\S]*4\/6/)
+  expect(await rasterText(ui, 'meter-1')).toContain('74% / 100% · warning')
   expect(await ui.find({ type: 'Text', text: '● online  ◐ idle  ○ offline  ▲ rising  ▼ falling  ⚑ alert  ✕ failed' })).toBeDefined()
   await ui.unmount()
 })
@@ -60,14 +86,15 @@ test('a press redraws the pane on the app and on the terminal', async ($, on) =>
     if (surface === 'desktop') {
       expect(await svg(ui, /^requests\/s over 1 steps/)).toBeDefined()
     } else {
-      expect(await ui.find({ type: 'Text', text: /^Throughput \d+ \/ 2000/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /^Hosts 6\/6 online  ●●●●●●$/ })).toBeDefined()
+      expect(await rasterText(ui, 'throughput')).toContain('of 2000')
+      expect(await rasterText(ui, 'tile-1')).toContain('6/6')
+      expect(await rasterText(ui, 'requests')).not.toContain('incident')
     }
     await ui.press({ key: 'incident' })
-    if (surface === 'terminal') expect(await ui.find({ type: 'Text', text: /■ incident ×1 \(#1\)/ })).toBeDefined()
+    if (surface === 'terminal') expect(await rasterText(ui, 'requests')).toContain('incident')
     else expect(await svg(ui, /events: 1 incident$/)).toBeDefined()
     await ui.press({ key: 'host:2' })
-    if (surface === 'terminal') expect(await ui.find({ type: 'Text', text: /^Hosts 5\/6 online  ●●◐●●●$/ })).toBeDefined()
+    if (surface === 'terminal') expect(await rasterText(ui, 'tile-1')).toContain('5/6')
     else expect(await svg(ui, /^web-3 idle$/)).toBeDefined()
     await ui.unmount()
   }

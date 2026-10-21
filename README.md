@@ -8,14 +8,17 @@ type Picture = { svg: string; alt: string; twin: string; isInteractive: boolean 
 ```
 
 `svg` goes into the platform's `Svg` element on the desktop app, VS Code and mobile; `alt` is that element's required
-words; `isInteractive` is its flag. The terminal draws no `Svg`, so a mod prints `twin` there instead: a plain-text form
-of the same picture (a `█░│` bar for a meter, `▁▂▃▅▇` blocks for a sparkline, a glyph for an icon).
+words; `isInteractive` is its flag. The terminal draws no `Svg`, so the library has a terminal branch:
+`toRaster(picture, { key })` turns the same picture into the props of the terminal's `Raster` element, a grid of coloured
+cells. Its shapes come out in block and braille characters, and its labels and figures in plain letters (see
+[On the terminal](#on-the-terminal-raster-cells)). `twin` is the picture as one line of text (a `█░│` bar for a meter,
+`▁▂▃▅▇` blocks for a sparkline, a glyph for an icon), for a status line or a log.
 
 ES module TypeScript, no DOM, no Node APIs, no runtime packages. Every string that reaches the markup is escaped, every
 picture is checked against the `Svg` size limit, and every colour comes from one `Theme` with a dark and a light set.
 
 - `src/`: the library
-- `examples/demo-mod/`: a service monitor in a pane, with every component, redrawn from atoms, twins on the terminal
+- `examples/demo-mod/`: a service monitor in a pane, with every component, redrawn from atoms, as Rasters on the terminal
 - `demo/index.html`: every component in both themes, driven by an event simulator. It opens from a double click.
 
 ## Adding a speedometer to your mod
@@ -38,7 +41,7 @@ with their `.ts` names. `examples/demo-mod/tsconfig.json` is a complete one.
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { gauge } from '../vendor/svg-panel/index.ts'
+import { gauge, toRaster } from '../vendor/svg-panel/index.ts'
 
 const rps = atom({ plugin: 'my-mod', key: 'rps' } as const, 1240)
 
@@ -56,10 +59,11 @@ export const register: Register = on => {
     const faster = () => update($, rps, n => Math.min(2000, n + 100))
 
     if (e.surface === 'terminal') {
-      const { Box, Text, Button } = $.ui.resolve(e)
+      const { Box, Button, Raster } = $.ui.resolve(e)
+      const cells = toRaster(picture, { key: 'rps' })
       return (
         <Box flexDirection="column">
-          <Text>{picture.twin}</Text>
+          <Raster key={cells.key} columns={cells.columns} rows={cells.rows} cells={cells.cells} />
           <Button key="faster" onPress={faster}>+100 rps</Button>
         </Box>
       )
@@ -213,12 +217,67 @@ legend([
 // twin: ─ requests/s  ◆ deploy  ● online
 ```
 
+## On the terminal: Raster cells
+
+The terminal draws no `Svg`, but it has `Raster`: a fixed box of cells, each holding one character, a foreground colour and
+a background colour. `toRaster` draws any picture into one, in the same way as
+[chafa](https://hpjansson.org/chafa/), in TypeScript and with no packages:
+
+1. **Dots.** It reads the picture's own markup and paints the same shapes on an invisible canvas of dots: arcs, lines,
+   rounded rectangles and circles, filled or stroked, dashed where the Svg is dashed. Each shape paints by its distance
+   from the dot, so its edges are soft. What the picture's CSS hides, such as a timeline's hover tooltips, stays hidden.
+2. **Cells.** It cuts the canvas into terminal cells, 2 dots across and 4 down per cell.
+3. **Symbols.** For each cell it picks the character and the two colours that best repeat the cell's eight dots, by the
+   least squared error. The characters are the half blocks `▀▄▌▐`, the quarters `▖▗▘▝▚▞▙▛▜▟`, the full block, and braille
+   (`⠁`…`⣿`) for thin lines that no block can split. Of a block's two colours, the one nearer the surface goes in the
+   background, so the surface stays one colour from cell to cell.
+4. **Letters.** Each `<text>` is set in plain letters on the row and in the columns its anchor gives, over the cells it
+   falls on. So `236k`, `300k` or `60k left` stay sharp instead of turning into dots.
+
+The result is the `Raster`'s props. Claude Code paints them in whatever terminal it runs in, such as Windows Terminal.
+
+```tsx
+const throughput = gauge({ value: 236e3, max: 300e3, threshold: 270e3, label: 'Tokens' })
+const cells = toRaster(throughput, { key: 'tokens' })   // { key: 'tokens', columns: 29, rows: 11, cells: '…' }
+<Raster key={cells.key} columns={cells.columns} rows={cells.rows} cells={cells.cells} />
+```
+
+By default a cell spans 8 CSS pixels across (`CELL_PX`) and 16 down, about a terminal's cell beside the pictures' 11px
+text. So a 232 × 176 gauge is 29 × 11 cells, and a 440px timeline is 55 columns.
+
+- `columns` sets the width in cells, and the height follows.
+- `theme` (or a hex `backdrop`) names the surface that a picture's soft edges mix into. Use the picture's own theme.
+- A picture drawn with `background: false` leaves its bare cells to the terminal's own background.
+
+What the cells hold, and what keeps them valid:
+
+- **Thin lines.** A stroke is at least one dot wide, so a 1px grid line still shows. Level and upright lines, and the
+  edges of rectangles, sit on whole dots, so a rule or a meter's track is one solid row and not two half-tones.
+- **Colour.** A thin line in braille keeps its own colour, not a blend with its soft edge. A colour within a few steps of
+  one of the picture's own colours is drawn in that colour exactly. Any other blend is rounded to 32 steps a channel,
+  so it fits the terminal's palette, which paints 1024 colour pairs at once.
+- **Valid characters.** A label's characters are made safe for a cell. A Raster takes only one-column BMP characters and
+  refuses the whole tree otherwise. So a control character becomes a space, a wide or astral one (`日`, `😀`) becomes `?`,
+  and a combining mark is dropped.
+- **Size.** A Raster is at most 512 × 256 cells. A taller picture is scaled down to fit.
+
+The pieces are exported too:
+
+- `rasterGrid(picture, options)` returns the cells as a grid: `{ ch, fg, bg }` per cell, colours as `0xRRGGBB` or
+  `DEFAULT_COLOR`.
+- `encodeCells` and `decodeCells` turn a grid into a `Raster`'s `cells` and back. Use them for a test, or for a
+  `$.ui.blit` that repaints a mounted Raster.
+- `gridText(grid)` returns the characters alone.
+- `ansi(grid)` returns the grid in 24-bit colour, to print in a terminal outside Claude Code.
+- `fitCell` is the per-cell choice, and `readSvg` is the dot painter.
+
 ### Helpers
 
 - `esc` escapes `& < > "`.
 - `assertBudget` throws past 131072 characters (`SVG_BUDGET`).
 - `abbreviate` shortens a number: `1240` becomes `1.2k`, `1200000` becomes `1.2M`.
 - `bar` and `blocks` make the twins.
+- `toRaster` and `rasterGrid` make a `Raster` for the terminal.
 - `scale`, `polar` and `arcPath` do the geometry.
 - `statusOf`, `STATUS_WORD` and `STATUS_TEXT_COLOR` map a value to a status, its word, and the theme key for a `Text`.
 
@@ -266,16 +325,18 @@ How it is built:
 - `hooks/register.tsx` keeps the state in atoms. The pane's buttons send the events: a new sample, a deploy or
   incident marker, a host status change, a reset, and a dark/light switch. A `live` button turns on a `$.clock.every`
   timer that adds a sample every two seconds.
-- The apps draw the pictures as `Svg` elements. The terminal prints the twins in `Text` and shows the throughput
-  gauge's twin in the status line.
+- The apps draw the pictures as `Svg` elements. The terminal draws the same pictures as `Raster` elements, from
+  `rasterize(scene, theme, columns)` in `scene.ts`. The requests chart narrows to the pane's `bodyColumns`. The
+  throughput gauge's twin goes in the status line.
 - It starts from a seeded history, so every picture has something to show.
 - `/svg-panel` opens the pane.
 
 To try it, either run `claude --plugin-dir examples/demo-mod`, or copy the folder into a session's mods folder.
 
 `claude plugin validate examples/demo-mod` passes, and `claude plugin test examples/demo-mod` runs
-`tests/pane.test.tsx`. Those tests check that the apps draw 25 `Svg` elements with their alts, that the terminal prints
-the twins and no `Svg`, that a press redraws on the desktop and the terminal, that a host button cycles its status and
+`tests/pane.test.tsx`. Those tests check that the apps draw 25 `Svg` elements with their alts, that the terminal draws
+11 `Raster` elements and no `Svg`, with the figures and labels in letters in their cells and the hover tooltips left
+out, that a press redraws on the desktop and the terminal, that a host button cycles its status and
 glyph colour, that live mode samples on a mocked clock until paused, and that the theme switch repaints.
 
 ## The demo page
@@ -285,7 +346,8 @@ glyph colour, that live mode samples on a mocked clock until paused, and that th
 - It draws each picture the way the app does: an `<img>` from a `data:` URL, or a `sandbox=""` `<iframe srcdoc>` when
   the picture is interactive. The timeline's hover works in that frame.
 - It shows each component in a dark and a light column (or one of them), with its twin under it.
-- It renders a terminal view of the pane.
+- It renders a terminal view of the pane. It paints each `Raster` from the same `cells` the mod sends: quarter blocks as
+  rectangles, braille as dots, and the rest as letters. The twins are shown under it.
 - Its simulator sends the demo mod's events: `measure` (a new sample, or a stream of them with `live`), `marker`
   (deploy or incident), `status` (a host's state) and `reset`. It logs them and redraws from the state.
 
@@ -313,7 +375,11 @@ Each component's test checks four things for a known input:
 - that a hostile label comes out escaped and well-formed
 - that it stays within the size budget
 
-`npm run mutate` applies 23 deliberate breakages, one at a time, and every one turns a test red.
+`test/raster.test.ts` checks the terminal branch. It covers how cells pack, which block or braille character a cell
+takes, the braille dot order, where a gauge's figures land, the hidden tooltips, hairlines, a tile's nested body, arcs,
+and the size limits.
+
+`npm run mutate` applies 36 deliberate breakages, one at a time, and every one turns a test red.
 
 ## Platform facts
 
@@ -356,7 +422,14 @@ between releases, so re-check these facts against your own build's types.
   - VS Code has no `Client`.
   - Mobile has no `Input`, `Select` or `Client`.
   - The terminal has no `Svg`, but it alone has `Raster` (a grid of coloured cells) and `Image` (a bitmap through the
-    kitty or iTerm2 protocols). A terminal pane could draw a sparkline as a `Raster`; this library uses text twins.
+    kitty or iTerm2 protocols). This library draws its pictures there as Rasters.
+- **`RasterProps`.** These are `key`, `columns` (1 to 512), `rows` (1 to 256) and `cells`.
+  - `cells` is padded base64 of `columns × rows` little-endian u32 triplets `[codePoint, foreground, background]`,
+    row by row. A colour is `0x00RRGGBB`, or `0x01000000` for the terminal's own.
+  - A code point must be one printable one-column BMP character, or the tree is refused, naming the cell.
+  - The palette paints 1024 colour pairs at once, and the rest as their nearest.
+  - `$.ui.blit({ requestId, key, cells })` repaints a mounted Raster without a redraw. A resize is a redraw.
+  - The test kit's `findAll({ type: 'Raster' })` returns the props as drawn.
 - **npm packages are refused, so the library ships as a folder.** A bare specifier fails at load with:
   `cannot import "pkg" (from hooks/register.tsx): a hooks module imports its own files by relative path and
   "claude-code", nothing else`. A relative path into `node_modules/` does load, but the supported way is the copied

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DemoState } from '../types'
-import { apply, draw, HOST_NAMES, nextStatus, seed, simulateMeasure, type DemoEvent } from './scene.ts'
+import { apply, draw, HOST_NAMES, nextStatus, rasterize, seed, simulateMeasure, type DemoEvent } from './scene.ts'
 
 const PANE = 'svg-panel-demo'
 /** How often the live mode takes a sample, in milliseconds. */
@@ -56,7 +56,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const state = await read($, service)
     const live = await read($, isLive)
-    const scene = draw(state, await read($, theme))
+    const themeName = await read($, theme)
+    const scene = draw(state, themeName)
     const press = (ev: DemoEvent) => () => send($, ev)
     const sample = () => change($, s => apply(s, simulateMeasure(s)))
     const toggleLive = () => update($, isLive, was => !was)
@@ -65,29 +66,34 @@ export const register: Register = on => {
     const hostName = (i: number) => HOST_NAMES[i] ?? `host ${i + 1}`
 
     if (e.surface === 'terminal') {
-      // The terminal draws no Svg: every picture is printed as its twin.
-      const { Box, Text, Button } = $.ui.resolve(e)
+      // The terminal draws no Svg: each picture comes as a Raster, its shapes
+      // in block and braille cells and its labels in letters.
+      const { Box, Text, Button, Raster } = $.ui.resolve(e)
+      const cells = rasterize(scene, themeName, e.props.bodyColumns)
 
       return (
         <Box flexDirection="column" gap="md">
-          <Box flexDirection="column">
-            <Box flexDirection="row">
-              <Text color={scene.statusColor}>● </Text>
-              <Text>{scene.throughput.twin}</Text>
+          <Box flexDirection="row" flexWrap="wrap" gap="sm">
+            {cells.gauges.map(r => (
+              <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
+            ))}
+          </Box>
+          <Raster key={cells.requests.key} columns={cells.requests.columns} rows={cells.requests.rows} cells={cells.requests.cells} />
+          <Box flexDirection="row" flexWrap="wrap" gap="sm">
+            {cells.tiles.map(r => (
+              <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
+            ))}
+          </Box>
+          <Box flexDirection="row" flexWrap="wrap" gap="sm">
+            <Box flexDirection="column">
+              {cells.meters.map(r => (
+                <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
+              ))}
             </Box>
-            <Text>{scene.latency.twin}</Text>
-          </Box>
-          <Text>{scene.requests.twin}</Text>
-          <Box flexDirection="column">
-            {scene.tiles.map(tile => (
-              <Text>{tile.twin}</Text>
-            ))}
-          </Box>
-          <Box flexDirection="column">
-            {scene.meters.map(m => (
-              <Text>{m.twin}</Text>
-            ))}
-            <Text>Latency p95 {scene.sparkline.twin}</Text>
+            <Box flexDirection="column">
+              <Text dimColor>Latency p95</Text>
+              <Raster key={cells.sparkline.key} columns={cells.sparkline.columns} rows={cells.sparkline.rows} cells={cells.sparkline.cells} />
+            </Box>
           </Box>
           <Box flexDirection="row" flexWrap="wrap" gap="xs">
             {scene.hosts.map((pic, i) => (
@@ -109,7 +115,7 @@ export const register: Register = on => {
     }
 
     const { Box, Text, Button, Svg } = $.ui.resolve(e)
-    const isLight = (await read($, theme)) === 'light'
+    const isLight = themeName === 'light'
 
     return (
       <Box flexDirection="column" gap="md">

@@ -64,6 +64,10 @@
   .terminal .t-success { color: #0ca30c; } .terminal .t-warning { color: #fab219; } .terminal .t-error { color: #d03b3b; }
   .terminal .t-subtle { color: #898781; } .terminal .t-claude { color: #d95926; } .terminal .t-merged { color: #9085e9; }
   .terminal .t-suggestion { color: #3987e5; }
+  .cells { display: flex; flex-wrap: wrap; gap: 9px; align-items: flex-start; margin: 0 0 18px; }
+  .cells canvas { display: block; max-width: 100%; }
+  .cells .stack { display: grid; gap: 0; }
+  .terminal pre { color: var(--term-ink); }
   .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   [hidden] { display: none !important; }
 </style>
@@ -108,9 +112,16 @@
   <div class="themes" id="themes"></div>
 
   <section class="panel" style="margin-top:16px">
-    <h2>Terminal: the twins, as the demo mod prints them</h2>
-    <pre class="terminal" id="terminal"></pre>
-    <p class="note">The terminal draws no Svg element, so the mod's pane prints each picture's twin in a Text instead.</p>
+    <h2>Terminal: the pictures as Rasters, as the demo mod draws them</h2>
+    <div class="terminal" id="terminal"></div>
+    <p class="note">The terminal draws no Svg element, so the mod's pane draws each picture as a Raster: its shapes on
+      dots, two across and four down a cell, each cell a block, a quarter or a braille character in two colours, and its
+      labels in letters. This page paints the cells as a terminal does, from the same <code>cells</code> the mod sends.</p>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <h2>Twins: the plain-text forms, for a status line or a log</h2>
+    <pre class="terminal" id="twins"></pre>
   </section>
 </main>
 
@@ -196,7 +207,89 @@
     return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   }
 
+  // A Raster painted the way a terminal paints its cells: the background, then
+  // the symbol. Quarter blocks are rectangles and braille is dots, as a
+  // terminal's own glyphs for them are; anything else is a letter.
+  const CELL = { w: 9, h: 18 }
+  const QUARTERS = Object.fromEntries(Object.entries(BLOCK_GLYPHS).map(([mask, ch]) => [ch, Number(mask)]))
+  const BRAILLE_DOTS = [0x01, 0x08, 0x02, 0x10, 0x04, 0x20, 0x40, 0x80]
+  const hex = c => `#${c.toString(16).padStart(6, '0')}`
+
+  function rasterCanvas(r) {
+    const grid = decodeCells(r.cells, r.columns, r.rows)
+    const k = window.devicePixelRatio || 1
+    const canvas = document.createElement('canvas')
+    canvas.width = r.columns * CELL.w * k
+    canvas.height = r.rows * CELL.h * k
+    canvas.style.width = `${r.columns * CELL.w}px`
+    canvas.setAttribute('role', 'img')
+    canvas.setAttribute('aria-label', gridText(grid).replace(/[\u2580-\u259f\u2800-\u28ff]+/g, ' ').replace(/\s+/g, ' ').trim())
+    const g = canvas.getContext('2d')
+    g.scale(k, k)
+    g.font = `${Math.round(CELL.h * 0.72)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    const ink = getComputedStyle(document.body).getPropertyValue('--term-ink') || '#e6e5e0'
+    grid.cells.forEach((c, i) => {
+      const x = (i % r.columns) * CELL.w
+      const y = Math.floor(i / r.columns) * CELL.h
+      if (c.bg !== DEFAULT_COLOR) {
+        g.fillStyle = hex(c.bg)
+        g.fillRect(x, y, CELL.w, CELL.h)
+      }
+      const ch = String.fromCodePoint(c.ch)
+      if (ch === ' ') return
+      g.fillStyle = c.fg === DEFAULT_COLOR ? ink : hex(c.fg)
+      const quarters = QUARTERS[ch]
+      if (quarters !== undefined) {
+        for (let d = 0; d < 8; d++) {
+          if ((quarters >> d) & 1) g.fillRect(x + (d % 2) * CELL.w / 2, y + (d >> 1) * CELL.h / 4, CELL.w / 2, CELL.h / 4)
+        }
+      } else if (c.ch >= 0x2800 && c.ch <= 0x28ff) {
+        BRAILLE_DOTS.forEach((bit, d) => {
+          if (!((c.ch - 0x2800) & bit)) return
+          g.beginPath()
+          g.arc(x + ((d % 2) + 0.5) * CELL.w / 2, y + ((d >> 1) + 0.5) * CELL.h / 4, CELL.w * 0.15, 0, 2 * Math.PI)
+          g.fill()
+        })
+      } else {
+        g.fillText(ch, x + CELL.w / 2, y + CELL.h / 2)
+      }
+    })
+    return canvas
+  }
+
+  function cellsRow(rasters, cls = 'cells') {
+    const row = document.createElement('div')
+    row.className = cls
+    row.append(...rasters.map(rasterCanvas))
+    return row
+  }
+
   function terminal() {
+    const s = draw(state, 'dark')
+    const r = rasterize(s, 'dark', 80)
+    const meters = cellsRow(r.meters, 'stack')
+    const text = document.createElement('pre')
+    const hosts = s.hosts.map((h, i) => `[ <span class="t-${h.textColor}">${h.glyph}</span> ${HOST_NAMES[i]} ]`).join(' ')
+    text.innerHTML = [
+      hosts,
+      `<span class="t-subtle">${esc(s.legend.twin)}</span>`,
+      '',
+      `[ + sample ] [ deploy ] [ incident ] [ ${timer ? 'pause' : 'live'} ] [ reset ]`,
+    ].join('\n')
+    const lower = document.createElement('div')
+    lower.className = 'cells'
+    const trend = document.createElement('div')
+    const label = document.createElement('pre')
+    label.className = 't-subtle'
+    label.textContent = 'Latency p95'
+    trend.append(label, rasterCanvas(r.sparkline))
+    lower.append(meters, trend)
+    return [cellsRow(r.gauges), cellsRow([r.requests]), cellsRow(r.tiles), lower, text]
+  }
+
+  function twins() {
     const s = draw(state, 'dark')
     const hosts = s.hosts.map((h, i) => `[ <span class="t-${h.textColor}">${h.glyph}</span> ${HOST_NAMES[i]} ]`).join(' ')
     return [
@@ -220,7 +313,8 @@
   function render() {
     const themes = document.getElementById('themes')
     themes.replaceChildren(...(show === 'both' ? ['dark', 'light'] : [show]).map(column))
-    document.getElementById('terminal').innerHTML = terminal()
+    document.getElementById('terminal').replaceChildren(...terminal())
+    document.getElementById('twins').innerHTML = twins()
     document.getElementById('log').textContent = log.join('\n') || '(none yet: the pictures start from a seeded history)'
     hostButtons()
   }
