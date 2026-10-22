@@ -22,13 +22,15 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          # Nothing is installed, and a job that can write tags takes no cache.
+          package-manager-cache: false
 
       - name: Version
         id: version
