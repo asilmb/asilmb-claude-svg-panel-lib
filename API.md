@@ -427,6 +427,124 @@ The functions `toRaster` is built from are exported for a mod that wants to draw
 It skips clipping and masks (what they would cut is drawn whole), filters, `<use>`, images, `opacity` on a group and
 other transforms. A path stops at a command outside the list above.
 
+## Terminal: drivers
+
+A driver is one way of showing a picture in a terminal. A list of drivers, ranked, picks the best one the terminal can
+draw; the last one draws everywhere, so a picture always shows. There are two lists:
+
+| List | Drivers, best first | Gives |
+| --- | --- | --- |
+| `claudeCode` | `image` (pixels in an `Image`), `raster` (cells in a `Raster`) | a `TerminalView`: the element to draw and its props |
+| `printDrivers` | `kitty` (a kitty graphics escape), `ansi` (24-bit coloured cells) | text for a program to write to standard output |
+
+The `image` and `kitty` drivers take kitty and Ghostty: `TERM` of `xterm-kitty` or `xterm-ghostty`, `KITTY_WINDOW_ID`
+set, or `TERM_PROGRAM` of `ghostty`. Never inside tmux (`TMUX` set): Claude Code draws no Image there, and tmux drops a
+kitty escape it is not asked to pass on. Everywhere else, Windows Terminal among them, the cells.
+
+### terminalView
+
+```ts
+terminalView(picture: Picture | string, options: ViewOptions): TerminalView
+
+type TerminalView = { element: 'Image'; props: ImageProps } | { element: 'Raster'; props: RasterPicture }
+type ImageProps = { key: string; source: { rgba: string; width: number; height: number }; columns: number; rows: number; alt: string }
+```
+
+```tsx
+const env = { TERM: await $.env.get('TERM'), TERM_PROGRAM: await $.env.get('TERM_PROGRAM'), /* … */ }
+const v = terminalView(picture, { env, key: 'cpu', columns: 29 })
+return v.element === 'Image' ? <Image {...v.props} /> : <Raster {...v.props} />
+```
+
+| `ViewOptions` | Default | |
+| --- | --- | --- |
+| `env` | required | the variables in `TERMINAL_ENV`, read with `$.env.get`; `$.env.get` takes each name as a literal |
+| `key` | required | the element's key: a Raster needs one, and `$.ui.blit` names it |
+| `prefer` | `SVG_PANEL_DRIVER` | a driver's id, used whatever the terminal says; an unknown one is passed over |
+| `columns` | width ÷ `CELL_PX` | the same box for both drivers: an Image fills the cells a Raster would |
+| `alt` | the picture's alt | an Image's words where it cannot draw |
+| `theme`, `backdrop` | | for the Raster, as in `toRaster` |
+| `cellPixels`, `maxBytes` | `16`, 2 MiB | for the Image, as in `toPixels` |
+
+iTerm2 3.5 and later draws an Image too, but only under Claude Code's fullscreen rendering, which the environment does
+not tell. There, pass `prefer: 'image'` or set `SVG_PANEL_DRIVER=image`.
+
+### toPixels
+
+```ts
+toPixels(picture: Picture | string, options?: PixelOptions): PixelPicture
+type PixelPicture = { width: number; height: number; data: Uint8Array; columns: number; rows: number }
+```
+
+The picture as straight RGBA pixels, four bytes each, row by row, over a box of `columns × rows` cells. A cell is twice
+as tall as it is wide, as a Raster's is, so the box keeps the picture's shape; past its edge the pixels are clear and the
+terminal's own background shows. It is the same painter as the Raster's, at more dots a cell.
+
+| `PixelOptions` | Default | |
+| --- | --- | --- |
+| `columns` | width ÷ `CELL_PX` | the box's width in cells |
+| `cellPixels` | `16` (`CELL_PIXELS`) | pixels across a cell, twice that down |
+| `maxBytes` | 2 MiB | the most bytes the pixels take |
+
+An Image takes 1 to 255 cells a side, 2048 pixels a side and 2 MiB of bytes (`PIXELS_MAX`); a bigger box takes fewer
+pixels a cell. **The Images of one tree share those 2 MiB**, so a pane of several passes each a part as `maxBytes`. The
+demo's pane splits it evenly over its 15 pictures.
+
+The pixels carry no letters yet: the library has no font, so a picture's `<text>` is left out. Shapes, colours and soft
+edges are all there; gradients paint in their mean colour, as in a Raster.
+
+### kittyImage and kittyDelete
+
+```ts
+kittyImage(pixels: PixelPicture, options?: { id?: number }): string
+kittyDelete(id: number): string
+```
+
+The kitty graphics escape for a program that writes to the terminal itself: raw RGBA (`f=32`), so no PNG encoder is
+needed, shown at the cursor over the box's cells, with no reply asked (`q=2`). A payload over 4096 base64 bytes
+(`KITTY_CHUNK`) goes in chunks, the keys on the first and `m=1` on all but the last. With an `id`, the same id sent again
+replaces the picture in place. `kittyDelete(id)` deletes the image and frees its data.
+
+### printView
+
+```ts
+printView(picture: Picture | string, options: PrintOptions): string
+```
+
+```ts
+process.stdout.write(printView(gauge(data), { env: process.env, columns: 29 }) + '\n')
+```
+
+kitty pixels where the terminal draws them, coloured cells (`ansi`) elsewhere. `PrintOptions` are `env`, `prefer`, and
+the options of `toRaster` and `toPixels`.
+
+### Adding a driver
+
+```ts
+type Driver<Out, Options> = {
+  id: string
+  rank: number                                     // the highest the terminal supports wins
+  supports(env: TerminalEnv): boolean              // judged by the environment alone
+  draw(picture: Picture | string, options: Options): Out
+}
+```
+
+`add` returns a new list with the driver in it and leaves the old one as it was; an id already in the list throws.
+
+```ts
+const wezterm: Driver<TerminalView, ViewOptions> = {
+  id: 'wezterm',
+  rank: 20,
+  supports: env => env.TERM_PROGRAM === 'WezTerm',
+  draw: (picture, options) => imageDriver.draw(picture, options),
+}
+const mine = claudeCode.add(wezterm)
+mine.draw(picture, { env, key: 'cpu' })
+```
+
+`drivers(...list)` makes a list of any kind of output, for a host of your own. `list.pick(env, prefer?)` names the
+driver it would use, and `list.byId(id)` finds one.
+
 ## Twins
 
 | Export | What it is |

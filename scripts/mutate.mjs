@@ -60,6 +60,15 @@ const MUTANTS = [
   ['raster hairline', 'src/readSvg.ts', 'export const MIN_STROKE = 1', 'export const MIN_STROKE = 0.25'],
   ['raster rect snap', 'src/readSvg.ts', 'const y = Math.round(Y(number(attrs.y)))', 'const y = Y(number(attrs.y))'],
   ['raster soft edge', 'src/dots.ts', 'return clamp(0.5 - sd, 0, 1)', 'return sd < 0 ? 1 : 0'],
+  ['pixels unpremultiply', 'src/pixels.ts', 'painted.data[i + c]! / a', 'painted.data[i + c]!'],
+  ['pixels cell aspect', 'src/pixels.ts', 'height: rows * 2 * px,', 'height: rows * px,'],
+  ['pixels byte limit', 'src/pixels.ts', 'Math.min(options.maxBytes ?? PIXELS_MAX.bytes, PIXELS_MAX.bytes)', '(options.maxBytes ?? PIXELS_MAX.bytes)'],
+  ['drivers tmux', 'src/drivers.ts', 'env.TMUX === undefined &&', ''],
+  ['drivers prefer', 'src/drivers.ts', "const named = byId(prefer ?? '') ?? byId(env.SVG_PANEL_DRIVER ?? '')", "const named = byId(prefer ?? '')"],
+  ['drivers rank', 'src/drivers.ts', 'sort((a, b) => b.rank - a.rank)', 'sort((a, b) => a.rank - b.rank)'],
+  ['drivers immutable', 'src/drivers.ts', 'return drivers(...ranked, driver)', 'ranked.push(driver); return drivers(...ranked)'],
+  ['kitty chunk', 'src/kitty.ts', 'export const KITTY_CHUNK = 4096', 'export const KITTY_CHUNK = 4100'],
+  ['kitty last chunk', 'src/kitty.ts', 'at + KITTY_CHUNK < payload.length ? 1 : 0', '1'],
 ]
 
 const survivors = []

@@ -16,12 +16,14 @@ import {
   ICONS,
   legend,
   meter,
+  PIXELS_MAX,
   sparkline,
   STATUS_TEXT_COLOR,
   statTile,
   statusGrid,
   statusOf,
   themes,
+  terminalView,
   timeline,
   toRaster,
   zoneOf,
@@ -30,6 +32,8 @@ import {
   type Picture,
   type RasterPicture,
   type Status,
+  type TerminalEnv,
+  type TerminalView,
   type Theme,
   type Zone,
 } from '../vendor/svg-panel/index.ts'
@@ -247,31 +251,49 @@ function breakdown(state: DemoState, theme: Theme): Picture[] {
   ]
 }
 
-export type TerminalScene = {
-  gauges: RasterPicture[]
-  requests: RasterPicture
-  tiles: RasterPicture[]
-  meters: RasterPicture[]
-  sparkline: RasterPicture
-  breakdown: RasterPicture[]
+/** The terminal's pictures, each shown one way: a Raster's props, or a driver's view. */
+export type TerminalScene<T = RasterPicture> = {
+  gauges: T[]
+  requests: T
+  tiles: T[]
+  meters: T[]
+  sparkline: T
+  breakdown: T[]
 }
 
 /** How wide the requests chart is drawn on the terminal, in cells, when the pane has room. */
 export const CHART_COLUMNS = 55
 
 /**
- * The scene's pictures as Raster props, for the terminal, which draws no Svg:
- * the same shapes on dots, the labels in letters. `columns` is the pane's
- * body width; the chart narrows to it.
+ * Lays the scene's pictures out for the terminal, each shown by `show` under
+ * its key. `columns` is the pane's body width; the chart narrows to it.
+ */
+function layOut<T>(scene: Scene, columns: number, show: (key: string, picture: Picture, width?: number) => T): TerminalScene<T> {
+  return {
+    gauges: [show('throughput', scene.throughput), show('latency', scene.latency)],
+    requests: show('requests', scene.requests, Math.max(1, Math.min(CHART_COLUMNS, columns))),
+    tiles: scene.tiles.map((tile, i) => show(`tile-${i}`, tile)),
+    meters: scene.meters.map((m, i) => show(`meter-${i}`, m)),
+    sparkline: show('latency-trend', scene.sparkline),
+    breakdown: scene.breakdown.map((p, i) => show(['host-load', 'traffic-share', 'host-heat', 'host-grid'][i] ?? `breakdown-${i}`, p)),
+  }
+}
+
+/**
+ * The scene's pictures as Raster props, for any terminal, which draws no Svg:
+ * the same shapes on dots, the labels in letters.
  */
 export function rasterize(scene: Scene, themeName: 'dark' | 'light', columns: number): TerminalScene {
-  const cells = (key: string, picture: Picture, width?: number) => toRaster(picture, { key, theme: themeName, columns: width })
-  return {
-    gauges: [cells('throughput', scene.throughput), cells('latency', scene.latency)],
-    requests: cells('requests', scene.requests, Math.max(1, Math.min(CHART_COLUMNS, columns))),
-    tiles: scene.tiles.map((tile, i) => cells(`tile-${i}`, tile)),
-    meters: scene.meters.map((m, i) => cells(`meter-${i}`, m)),
-    sparkline: cells('latency-trend', scene.sparkline),
-    breakdown: scene.breakdown.map((p, i) => cells(['host-load', 'traffic-share', 'host-heat', 'host-grid'][i] ?? `breakdown-${i}`, p)),
-  }
+  return layOut(scene, columns, (key, picture, width) => toRaster(picture, { key, theme: themeName, columns: width }))
+}
+
+/**
+ * The scene's pictures as the drivers pick for this terminal: Images of pixels
+ * where it draws them (kitty, Ghostty), Rasters elsewhere. The Images of one
+ * pane share its 2 MiB of pixels, a like part each.
+ */
+export function terminalScene(scene: Scene, themeName: 'dark' | 'light', columns: number, env: TerminalEnv): TerminalScene<TerminalView> {
+  const count = 4 + scene.tiles.length + scene.meters.length + scene.breakdown.length
+  const maxBytes = Math.floor(PIXELS_MAX.bytes / count)
+  return layOut(scene, columns, (key, picture, width) => terminalView(picture, { key, env, theme: themeName, columns: width, maxBytes }))
 }

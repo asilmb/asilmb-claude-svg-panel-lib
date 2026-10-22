@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { decodeCells, gridText } from '../vendor/svg-panel/index.ts'
+import { decodeCells, fromBase64, gridText } from '../vendor/svg-panel/index.ts'
 
 const PANE = {
   plugin: 'svg-panel-demo',
@@ -81,6 +81,39 @@ test('the terminal draws the pictures as Rasters, with their labels in letters',
   expect(await ui.find({ type: 'Text', text: '● online  ◐ idle  ○ offline  ▲ rising  ▼ falling  ⚑ alert  ✕ failed' })).toBeDefined()
   await ui.unmount()
 })
+
+test('in kitty the terminal draws the same pictures as Images of pixels, with their alt', async ($, on) => {
+  mock.env(on, { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.findAll({ type: 'Raster' })).toHaveLength(0)
+  const images = await ui.findAll({ type: 'Image' })
+  expect(images.map(i => i.props.key)).toEqual([
+    'throughput', 'latency', 'requests', 'host-load', 'traffic-share', 'host-heat', 'host-grid',
+    'tile-0', 'tile-1', 'tile-2', 'tile-3', 'meter-0', 'meter-1', 'meter-2', 'latency-trend',
+  ])
+  let bytes = 0
+  for (const i of images) {
+    const { source, columns } = i.props as { source: { rgba: string; width: number; height: number }; columns: number }
+    expect(columns).toBeLessThanOrEqual(PANE.props.bodyColumns)
+    expect(fromBase64(source.rgba)).toHaveLength(source.width * source.height * 4)
+    bytes += source.width * source.height * 4
+  }
+  // One tree's Images share 2 MiB.
+  expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024)
+  // The gauge keeps the Raster's box: 29 cells by 11.
+  expect(images[0]?.props).toMatchObject({ columns: 29, rows: 11, alt: 'Throughput: 1182 of 2000, ok; threshold 1600' })
+  await ui.unmount()
+})
+
+for (const [why, extra] of [['inside tmux', { TMUX: '/tmp/tmux-0/default,1,0' }], ['with SVG_PANEL_DRIVER=raster', { SVG_PANEL_DRIVER: 'raster' }]] as const) {
+  test(`${why}, kitty gets Rasters again`, async ($, on) => {
+    mock.env(on, { TERM: 'xterm-kitty', ...extra })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.findAll({ type: 'Image' })).toHaveLength(0)
+    expect(await ui.findAll({ type: 'Raster' })).toHaveLength(15)
+    await ui.unmount()
+  })
+}
 
 test('a press redraws the pane on the app and on the terminal', async ($, on) => {
   on('ui.status', () => ({ value: undefined }))

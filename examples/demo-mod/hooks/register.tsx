@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DemoState } from '../types'
-import { apply, draw, HOST_NAMES, nextStatus, rasterize, seed, simulateMeasure, type DemoEvent } from './scene.ts'
+import type { TerminalEnv, TerminalView } from '../vendor/svg-panel/index.ts'
+import { apply, draw, HOST_NAMES, nextStatus, seed, simulateMeasure, terminalScene, type DemoEvent } from './scene.ts'
 
 const PANE = 'svg-panel-demo'
 /** How often the live mode takes a sample, in milliseconds. */
@@ -28,6 +29,22 @@ async function send($: EngineInterface, ev: DemoEvent): Promise<void> {
 /** The live mode's tick: one more sample while live is on. */
 async function tick($: EngineInterface): Promise<void> {
   if (await read($, isLive)) await change($, s => apply(s, simulateMeasure(s)))
+}
+
+/**
+ * What the drivers judge the terminal by. `$.env.get` takes each name as a
+ * literal, so they are spelt out: svg-panel's TERMINAL_ENV. One it cannot
+ * read is unset, so the picture falls back to a Raster.
+ */
+async function terminalEnv($: EngineInterface): Promise<TerminalEnv> {
+  const [TERM, TERM_PROGRAM, KITTY_WINDOW_ID, TMUX, SVG_PANEL_DRIVER] = await Promise.all([
+    $.env.get('TERM').catch(() => undefined),
+    $.env.get('TERM_PROGRAM').catch(() => undefined),
+    $.env.get('KITTY_WINDOW_ID').catch(() => undefined),
+    $.env.get('TMUX').catch(() => undefined),
+    $.env.get('SVG_PANEL_DRIVER').catch(() => undefined),
+  ])
+  return { TERM, TERM_PROGRAM, KITTY_WINDOW_ID, TMUX, SVG_PANEL_DRIVER }
 }
 
 export const register: Register = on => {
@@ -66,38 +83,32 @@ export const register: Register = on => {
     const hostName = (i: number) => HOST_NAMES[i] ?? `host ${i + 1}`
 
     if (e.surface === 'terminal') {
-      // The terminal draws no Svg: each picture comes as a Raster, its shapes
-      // in block and braille cells and its labels in letters.
-      const { Box, Text, Button, Raster } = $.ui.resolve(e)
-      const cells = rasterize(scene, themeName, e.props.bodyColumns)
+      // The terminal draws no Svg: each picture comes as an Image of pixels
+      // where the terminal draws them (kitty, Ghostty), else as a Raster, its
+      // shapes in block and braille cells and its labels in letters.
+      const { Box, Text, Button, Raster, Image } = $.ui.resolve(e)
+      const views = terminalScene(scene, themeName, e.props.bodyColumns, await terminalEnv($))
+      const show = (v: TerminalView) => (v.element === 'Image' ? <Image {...v.props} /> : <Raster {...v.props} />)
 
       return (
         <Box flexDirection="column" gap="md">
           <Box flexDirection="row" flexWrap="wrap" gap="sm">
-            {cells.gauges.map(r => (
-              <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
-            ))}
+            {views.gauges.map(show)}
           </Box>
-          <Raster key={cells.requests.key} columns={cells.requests.columns} rows={cells.requests.rows} cells={cells.requests.cells} />
+          {show(views.requests)}
           <Box flexDirection="row" flexWrap="wrap" gap="sm">
-            {cells.breakdown.map(r => (
-              <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
-            ))}
+            {views.breakdown.map(show)}
           </Box>
           <Box flexDirection="row" flexWrap="wrap" gap="sm">
-            {cells.tiles.map(r => (
-              <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
-            ))}
+            {views.tiles.map(show)}
           </Box>
           <Box flexDirection="row" flexWrap="wrap" gap="sm">
             <Box flexDirection="column">
-              {cells.meters.map(r => (
-                <Raster key={r.key} columns={r.columns} rows={r.rows} cells={r.cells} />
-              ))}
+              {views.meters.map(show)}
             </Box>
             <Box flexDirection="column">
               <Text dimColor>Latency p95</Text>
-              <Raster key={cells.sparkline.key} columns={cells.sparkline.columns} rows={cells.sparkline.rows} cells={cells.sparkline.cells} />
+              {show(views.sparkline)}
             </Box>
           </Box>
           <Box flexDirection="row" flexWrap="wrap" gap="xs">
