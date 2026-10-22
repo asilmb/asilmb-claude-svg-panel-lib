@@ -1,6 +1,6 @@
 {
   "name": "svg-panel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SVG pictures for Claude Code mod panels, with Raster cells for the terminal and plain-text twins: gauge, meter, sparkline, timeline, bars, donut, heatmap, status grid, stat tile, icon, legend.",
   "type": "module",
   "license": "MIT",
