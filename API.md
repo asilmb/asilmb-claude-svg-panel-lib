@@ -502,8 +502,9 @@ kittyDelete(id: number): string
 
 The kitty graphics escape for a program that writes to the terminal itself: raw RGBA (`f=32`), so no PNG encoder is
 needed, shown at the cursor over the box's cells, with no reply asked (`q=2`). A payload over 4096 base64 bytes
-(`KITTY_CHUNK`) goes in chunks, the keys on the first and `m=1` on all but the last. With an `id`, the same id sent again
-replaces the picture in place. `kittyDelete(id)` deletes the image and frees its data.
+(`KITTY_CHUNK`) goes in chunks, the keys on the first and `m=1` on all but the last. With an `id`, sending that id again
+deletes the earlier picture and its placements and shows the new one at the cursor, so move the cursor back first to
+redraw in place. `kittyDelete(id)` deletes the image and frees its data.
 
 ### printView
 

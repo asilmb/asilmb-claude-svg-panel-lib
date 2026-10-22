@@ -12,7 +12,8 @@ const command = (keys: string, payload = '') => `\x1b_G${keys}${payload ? `;${pa
 
 /**
  * Pixels shown at the cursor over their box of cells, the cursor after them.
- * With an `id`, sending the same id again replaces the picture in place.
+ * With an `id`, sending that id again deletes the earlier picture and its
+ * placements, and shows the new one at the cursor.
  * `q=2`: the terminal answers nothing, so nothing lands in the program's input.
  */
 export function kittyImage(pixels: PixelPicture, options: { id?: number } = {}): string {
