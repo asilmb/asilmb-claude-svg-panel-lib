@@ -463,7 +463,18 @@ Each component's test checks four things for a known input:
 takes, the braille dot order, where a gauge's figures land, the hidden tooltips, hairlines, a tile's nested body, arcs,
 and the size limits.
 
-`npm run mutate` applies 51 deliberate breakages, one at a time, and every one turns a test red.
+`npm run mutate` applies 60 deliberate breakages, one at a time, and every one turns a test red.
+
+### Releases
+
+A release is automatic. `.github/workflows/release.yml` runs on every pull request and on every push to `main`. It checks
+that the built files match `src/`, then runs the type check, the tests and the mutants. On a push to `main` whose
+`package.json` version has no tag yet, it then tags `vX.Y.Z` and publishes a GitHub release, with notes listing the
+merged pull requests.
+
+To release, raise `version` in `package.json` (and in `examples/demo-mod/.claude-plugin/plugin.json`) in the pull
+request. Merging it does the rest. A push that leaves the version as it is releases nothing. The demo mod's checks need
+Claude Code, so run them locally with `npm run check`.
 
 ## Platform facts
 
