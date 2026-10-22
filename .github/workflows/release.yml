@@ -1,0 +1,70 @@
+# Checks every pull request, and releases from main: a push to main whose
+# package.json version has no tag yet runs the same checks, then tags
+# vX.Y.Z and publishes a GitHub release with notes from the merged pull
+# requests. To release, raise the version in the pull request; merging does
+# the rest. The demo mod's typecheck and tests need Claude Code, so they stay
+# local (`npm run check`).
+name: release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          # Nothing is installed, and a job that can write tags takes no cache.
+          package-manager-cache: false
+
+      - name: Version
+        id: version
+        run: |
+          tag="v$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "$tag is already released"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Built files match src/
+        if: github.event_name == 'pull_request' || steps.version.outputs.new == 'true'
+        run: |
+          npm run build
+          git diff --exit-code -- dist demo examples/demo-mod/vendor
+
+      - name: Typecheck
+        if: github.event_name == 'pull_request' || steps.version.outputs.new == 'true'
+        run: npx --yes --package typescript@6.0.2 tsc -p .
+
+      - name: Test
+        if: github.event_name == 'pull_request' || steps.version.outputs.new == 'true'
+        run: npm test
+
+      - name: Mutants
+        if: github.event_name == 'pull_request' || steps.version.outputs.new == 'true'
+        run: npm run mutate
+
+      - name: Release
+        if: github.event_name == 'push' && steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes

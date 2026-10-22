@@ -324,6 +324,33 @@ The pieces are exported too:
 - `ansi(grid)` returns the grid in 24-bit colour, to print in a terminal outside Claude Code.
 - `fitCell` is the per-cell choice, and `readSvg` is the dot painter.
 
+## On the terminal: pixels where it draws them
+
+Claude Code's terminal also has `Image`, which draws real pixels in kitty and Ghostty. `terminalView` picks for the
+terminal it runs in: an Image there, a Raster everywhere else, Windows Terminal among them.
+
+```tsx
+const env = { TERM: await $.env.get('TERM'), KITTY_WINDOW_ID: await $.env.get('KITTY_WINDOW_ID'), /* … */ }
+const v = terminalView(throughput, { env, key: 'tokens' })
+return v.element === 'Image' ? <Image {...v.props} /> : <Raster {...v.props} />
+```
+
+Each way of showing a picture is a driver in a ranked list, so another terminal or another host is one more driver:
+
+- `claudeCode` holds `image` and `raster`, for a mod's terminal surface.
+- `printDrivers` holds `kitty` (a kitty graphics escape) and `ansi` (coloured cells), for a program that writes to
+  standard output itself: `printView(picture, { env: process.env })`.
+- `list.add(driver)` returns a list with your driver in it. The highest-ranked driver the terminal supports wins, and
+  `prefer` or `SVG_PANEL_DRIVER` names one outright.
+
+What to know:
+
+- **Text.** The pixels carry no letters yet, because the library has no font. Shapes and colours are all there.
+- **Size.** The Images of one pane share 2 MiB of pixels. Give each its part with `maxBytes`.
+- **tmux.** Inside tmux the drivers fall back to cells.
+- **iTerm2.** iTerm2 draws an Image only under fullscreen rendering, which the environment does not tell, so it gets
+  cells unless you pass `prefer: 'image'`.
+
 ### Helpers
 
 [API.md](API.md) describes each of these in full.
@@ -436,7 +463,18 @@ Each component's test checks four things for a known input:
 takes, the braille dot order, where a gauge's figures land, the hidden tooltips, hairlines, a tile's nested body, arcs,
 and the size limits.
 
-`npm run mutate` applies 51 deliberate breakages, one at a time, and every one turns a test red.
+`npm run mutate` applies 60 deliberate breakages, one at a time, and every one turns a test red.
+
+### Releases
+
+A release is automatic. `.github/workflows/release.yml` runs on every pull request and on every push to `main`. It checks
+that the built files match `src/`, then runs the type check, the tests and the mutants. On a push to `main` whose
+`package.json` version has no tag yet, it then tags `vX.Y.Z` and publishes a GitHub release, with notes listing the
+merged pull requests.
+
+To release, raise `version` in `package.json` (and in `examples/demo-mod/.claude-plugin/plugin.json`) in the pull
+request. Merging it does the rest. A push that leaves the version as it is releases nothing. The demo mod's checks need
+Claude Code, so run them locally with `npm run check`.
 
 ## Platform facts
 

@@ -774,472 +774,6 @@ function dash(points                  , closed         , pattern                
   return out
 }
 
-// ---- src/gauge.ts
-// A 240° arc over a scale, a threshold tick, the value as the hero figure and
-// a status dot with its word.
-
-const GAUGE_SWEEP = 240
-const GAUGE_SIZE = { width: 232, height: 176 }
-/** The arc's centre and radius in the picture's own pixels. */
-const GAUGE_ARC = { cx: 116, cy: 96, r: 72 }
-
-/** The status a gauge or meter shows when none is given. */
-function statusOf(value        , max        , threshold         )         {
-  if (value >= max) return 'critical'
-  if (threshold !== undefined && value >= threshold) return 'warning'
-  return 'good'
-}
-
-/** The angle (degrees clockwise from twelve) a value sits at on the gauge. */
-function gaugeAngle(value        , min        , max        )         {
-  return scale(min, max, -GAUGE_SWEEP / 2, GAUGE_SWEEP / 2)(value)
-}
-
-function gauge(data           , options               = {})          {
-  const theme = pickTheme(options.theme)
-  const fmt = options.format ?? abbreviate
-  const min = finite(data.min)
-  const max = finite(data.max, min + 1)
-  const value = finite(data.value, min)
-  const status = data.status ?? statusOf(value, max, data.threshold)
-  const word = data.statusWord ?? STATUS_WORD[status]
-  const color = theme.status[status]
-  const { cx, cy, r } = GAUGE_ARC
-  const half = GAUGE_SWEEP / 2
-  const angle = gaugeAngle(value, min, max)
-  const parts           = []
-
-  parts.push(
-    `<path class="gauge-track" d="${arcPath(cx, cy, r, -half, half)}" fill="none" stroke="${theme.grid}" stroke-width="10" stroke-linecap="round"/>`,
-  )
-  if (value > min) {
-    parts.push(
-      `<path class="gauge-value" d="${arcPath(cx, cy, r, -half, angle)}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"/>`,
-    )
-  }
-
-  if (data.threshold !== undefined && Number.isFinite(data.threshold)) {
-    const a = gaugeAngle(data.threshold, min, max)
-    const inner = polar(cx, cy, r - 9, a)
-    const outer = polar(cx, cy, r + 9, a)
-    const d = `M${num(inner.x)} ${num(inner.y)}L${num(outer.x)} ${num(outer.y)}`
-    const at = polar(cx, cy, r + 18, a)
-    const anchor = at.x > cx + 6 ? 'start' : at.x < cx - 6 ? 'end' : 'middle'
-    parts.push(
-      `<path d="${d}" stroke="${theme.surface}" stroke-width="6" stroke-linecap="round"/>`,
-      `<path class="gauge-tick" d="${d}" stroke="${theme.ink2}" stroke-width="2" stroke-linecap="round"/>`,
-      text(at.x, at.y + 4, data.thresholdLabel ?? fmt(data.threshold), { size: 10, fill: theme.muted, anchor }),
-    )
-  }
-
-  const start = polar(cx, cy, r, -half)
-  const end = polar(cx, cy, r, half)
-  parts.push(
-    text(start.x, start.y + 20, fmt(min), { size: 10, fill: theme.muted, anchor: 'middle', cls: 'gauge-min' }),
-    text(end.x, end.y + 20, fmt(max), { size: 10, fill: theme.muted, anchor: 'middle', cls: 'gauge-max' }),
-    text(cx, cy + 6, fmt(value), { size: 30, fill: theme.ink, anchor: 'middle', weight: 600, cls: 'gauge-hero' }),
-    text(cx, cy + 24, `of ${fmt(max)}`, { size: 11, fill: theme.muted, anchor: 'middle' }),
-  )
-
-  const rowWidth = 12 + textWidth(word, 12)
-  const dotX = cx - rowWidth / 2 + 4
-  parts.push(
-    `<circle class="gauge-dot" cx="${num(dotX)}" cy="160" r="4" fill="${color}"/>`,
-    text(dotX + 8, 164, word, { size: 12, fill: theme.ink2, cls: 'gauge-word' }),
-  )
-
-  const name = data.label ?? 'Gauge'
-  const thresholdWords = data.threshold === undefined ? '' : `; threshold ${data.thresholdLabel ?? fmt(data.threshold)}`
-  const alt = `${name}: ${fmt(value)} of ${fmt(max)}, ${word}${thresholdWords}`
-  const svg = svgDoc({
-    ...GAUGE_SIZE,
-    title: alt,
-    background: options.background === false ? undefined : theme.surface,
-    body: parts.join(''),
-  })
-  const lead = data.label === undefined ? '' : `${data.label} `
-  return {
-    svg: assertBudget(svg),
-    alt,
-    twin: `${lead}${fmt(value)} / ${fmt(max)} ${bar(value, max, { min, tick: data.threshold })} ${word}`,
-    isInteractive: false,
-  }
-}
-
-// ---- src/heatmap.ts
-// A grid of cells in five steps of one colour, with row and column labels and
-// a `less ■■■■■ more` key; a missing value is a short dash.
-
-const HEAT_STEPS = 5
-/** The twin's shades: a space for a missing value, then one per step, faint to full. */
-const HEAT_SHADES = ' ·░▒▓█'
-
-/** The step (0 to 4) a value falls in on `[lo, hi]`. */
-function heatStep(value        , lo        , hi        )         {
-  if (hi <= lo) return HEAT_STEPS - 1
-  return Math.min(HEAT_STEPS - 1, Math.max(0, Math.floor(((value - lo) / (hi - lo)) * HEAT_STEPS)))
-}
-
-/** `#rgb` or `#rrggbb` as three channels; black when it is neither. */
-function channels(hex        )           {
-  const m = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(hex.trim())
-  const full = m ? (m[1] .length === 3 ? [...m[1] ].map(c => c + c).join('') : m[1] ) : '000000'
-  return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16))
-}
-
-function mix(a        , b        , t        )         {
-  const [x, y] = [channels(a), channels(b)]
-  return `#${x.map((v, i) => Math.round(v + (y[i]  - v) * t).toString(16).padStart(2, '0')).join('')}`
-}
-
-/** The five fills, from faint to full, mixed from the grid colour to `color`. */
-function heatColors(theme       , color        )           {
-  return Array.from({ length: HEAT_STEPS }, (_, k) => mix(theme.grid, color, 0.2 + (0.8 * k) / (HEAT_STEPS - 1)))
-}
-
-function heatmap(data             , options                 = {})          {
-  const theme = pickTheme(options.theme)
-  const fmt = options.format ?? abbreviate
-  const size = options.cell ?? 14
-  const gap = options.gap ?? 2
-  const pitch = size + gap
-  const fills = heatColors(theme, options.color ?? theme.series.blue)
-  const rows = data.values
-  const columns = Math.max(0, ...rows.map(r => r.length))
-  const present = rows.flatMap(r => r.filter((v)              => typeof v === 'number' && Number.isFinite(v)))
-  let lo = Infinity
-  let hi = -Infinity
-  for (const v of present) {
-    if (v < lo) lo = v
-    if (v > hi) hi = v
-  }
-  lo = options.min ?? (present.length ? lo : 0)
-  hi = options.max ?? (present.length ? hi : 1)
-
-  const rowLabels = data.rowLabels ?? []
-  const colLabels = data.colLabels ?? []
-  // The grid starts on a terminal cell's corner (8 by 16 CSS pixels), so on a Raster each cell keeps to its own
-  // columns and rows; the row labels get room for a terminal's letters, which run wider than the Svg's.
-  const labelRoom = (l        ) => Math.max(textWidth(l, 10), [...l].length * 8)
-  const left = Math.ceil((6 + (rowLabels.length ? Math.max(...rowLabels.map(labelRoom)) + 6 : 0)) / 8) * 8
-  const top = Math.ceil((6 + (colLabels.length ? 14 : 0)) / 16) * 16
-  const showKey = options.key ?? true
-  const gridW = columns * pitch - gap
-  const keyW = textWidth('less', 10) + 6 + HEAT_STEPS * pitch + textWidth('more', 10) + 4
-  const width = Math.ceil(left + Math.max(gridW, showKey ? keyW : 0) + 6)
-  const height = Math.ceil(top + rows.length * pitch - gap + (showKey ? 22 : 6))
-  const parts           = []
-
-  // Column labels where they fit: every k-th, so none runs into the next.
-  const stride = Math.max(1, Math.ceil((Math.max(0, ...colLabels.map(l => textWidth(l, 10))) + 4) / pitch))
-  colLabels.forEach((l, c) => {
-    if (c % stride === 0 && c < columns) parts.push(text(left + c * pitch, top - 4, l, { size: 10, fill: theme.muted, cls: 'heat-col' }))
-  })
-  rows.forEach((row, r) => {
-    const y = top + r * pitch
-    if (rowLabels[r] !== undefined) parts.push(text(left - 6, y + size - 2, rowLabels[r] , { size: 10, fill: theme.muted, anchor: 'end', cls: 'heat-row' }))
-    for (let c = 0; c < columns; c++) {
-      const v = row[c]
-      const x = left + c * pitch
-      const ok = typeof v === 'number' && Number.isFinite(v)
-      parts.push(ok
-        ? `<rect class="heat-cell" x="${num(x)}" y="${num(y)}" width="${size}" height="${size}" rx="2" fill="${fills[heatStep(v, lo, hi)]}"/>`
-        : `<rect class="heat-empty" x="${num(x + size / 2 - 3)}" y="${num(y + size / 2 - 1)}" width="6" height="2" rx="1" fill="${theme.muted}"/>`)
-    }
-  })
-  if (showKey) {
-    const ky = top + rows.length * pitch - gap + 8
-    const kx = left + Math.max(gridW, keyW) - keyW
-    parts.push(text(kx, ky + 9, 'less', { size: 10, fill: theme.muted, cls: 'heat-key' }))
-    const sx = kx + textWidth('less', 10) + 6
-    fills.forEach((f, k) => parts.push(`<rect x="${num(sx + k * pitch)}" y="${num(ky)}" width="${size}" height="${size}" rx="2" fill="${f}"/>`))
-    parts.push(text(sx + HEAT_STEPS * pitch + 2, ky + 9, 'more', { size: 10, fill: theme.muted }))
-  }
-
-  // The hottest cell, named by its labels where there are labels.
-  let best                                                 
-  rows.forEach((row, r) => row.forEach((v, c) => {
-    if (typeof v === 'number' && Number.isFinite(v) && (best === undefined || v > best.v)) best = { r, c, v }
-  }))
-  const name = options.label ?? 'Heatmap'
-  const where = best === undefined ? '' : [rowLabels[best.r], colLabels[best.c]].filter(Boolean).join(', ')
-  const alt = present.length === 0
-    ? `${name}: no values yet`
-    : `${name}: ${rows.length} rows by ${columns} columns, low ${fmt(Math.min(...present))}, high ${fmt(best .v)}${where ? ` at ${where}` : ''}`
-  const svg = svgDoc({
-    width,
-    height,
-    title: alt,
-    background: options.background === false ? undefined : theme.surface,
-    body: parts.join(''),
-  })
-  // The twin: one shade a cell, a line a row, the rows' labels in front.
-  const pad = Math.max(0, ...rowLabels.map(l => [...l].length))
-  const twin = rows.map((row, r) => {
-    const shades = Array.from({ length: columns }, (_, c) => {
-      const v = row[c]
-      return typeof v === 'number' && Number.isFinite(v) ? HEAT_SHADES[1 + heatStep(v, lo, hi)] : HEAT_SHADES[0]
-    }).join('')
-    return pad === 0 ? shades : `${(rowLabels[r] ?? '').padEnd(pad)} ${shades}`
-  }).join('\n')
-  return { svg: assertBudget(svg), alt, twin, isInteractive: false }
-}
-
-// ---- src/icon.ts
-// The named icon set: each drawn as SVG at any radius, and paired with a
-// one-column glyph and a colour for a `Text` on a `Button` beside the picture.
-
-/** A Claude Code theme key for the glyph's `Text`. */
-
-const ICONS                             = {
-  online: { glyph: '●', label: 'online', textColor: 'success', color: t => t.status.good },
-  idle: { glyph: '◐', label: 'idle', textColor: 'merged', color: t => t.series.violet },
-  offline: { glyph: '○', label: 'offline', textColor: 'subtle', color: t => t.muted },
-  rising: { glyph: '▲', label: 'rising', textColor: 'suggestion', color: t => t.series.blue },
-  falling: { glyph: '▼', label: 'falling', textColor: 'claude', color: t => t.series.orange },
-  alert: { glyph: '⚑', label: 'alert', textColor: 'warning', color: t => t.status.warning },
-  failed: { glyph: '✕', label: 'failed', textColor: 'error', color: t => t.status.critical },
-}
-
-const ICON_NAMES = Object.keys(ICONS)              
-
-/** The icon's shape as an SVG fragment of radius `r` centred on `(cx, cy)`. */
-function iconMark(name          , cx        , cy        , r        , theme       )         {
-  const color = ICONS[name].color(theme)
-  const sw = num(Math.max(1.5, r / 4.5))
-  const stroke = `fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"`
-  const p = (dx        , dy        ) => `${num(cx + dx * r)} ${num(cy + dy * r)}`
-  const circle = (k        , paint        ) => `<circle cx="${num(cx)}" cy="${num(cy)}" r="${num(r * k)}" ${paint}/>`
-  switch (name) {
-    case 'online':
-      return `<g class="icon-online">${circle(0.7, `fill="${color}"`)}</g>`
-    case 'idle':
-      return (
-        `<g class="icon-idle"><path d="M${p(0, -0.7)}A${num(0.7 * r)} ${num(0.7 * r)} 0 0 0 ${p(0, 0.7)}Z" fill="${color}"/>` +
-        `${circle(0.7, stroke)}</g>`
-      )
-    case 'offline':
-      return `<g class="icon-offline">${circle(0.7, stroke)}</g>`
-    case 'rising':
-      return `<path class="icon-rising" d="M${p(0, -0.75)}L${p(0.8, 0.6)}L${p(-0.8, 0.6)}Z" fill="${color}" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round"/>`
-    case 'falling':
-      return `<path class="icon-falling" d="M${p(0, 0.75)}L${p(0.8, -0.6)}L${p(-0.8, -0.6)}Z" fill="${color}" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round"/>`
-    case 'alert':
-      return (
-        `<g class="icon-alert"><path d="M${p(-0.5, 0.85)}L${p(-0.5, -0.85)}" ${stroke}/>` +
-        `<path d="M${p(-0.5, -0.85)}L${p(0.75, -0.45)}L${p(-0.5, -0.05)}Z" fill="${color}" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round"/></g>`
-      )
-    case 'failed':
-      return `<path class="icon-failed" d="M${p(-0.6, -0.6)}L${p(0.6, 0.6)}M${p(0.6, -0.6)}L${p(-0.6, 0.6)}" ${stroke}/>`
-  }
-}
-
-/** One icon as a picture; its twin is the glyph. */
-function icon(name          , options              = {})              {
-  const theme = pickTheme(options.theme)
-  const spec = ICONS[name]
-  const r = Math.max(2, options.r ?? 8)
-  const size = 2 * r + 4
-  const label = options.label ?? spec.label
-  const svg = svgDoc({
-    width: size,
-    height: size,
-    background: options.background ? theme.surface : undefined,
-    body: `<g><title>${esc(label)}</title>${iconMark(name, size / 2, size / 2, r, theme)}</g>`,
-  })
-  return {
-    svg,
-    alt: label,
-    twin: spec.glyph,
-    isInteractive: false,
-    glyph: spec.glyph,
-    color: spec.color(theme),
-    textColor: spec.textColor,
-  }
-}
-
-// ---- src/marks.ts
-// Marker shapes for points and legend swatches, each with a surface ring.
-
-/** The one-column glyph that stands for each shape in a twin. */
-const SHAPE_GLYPH                        = {
-  circle: '●',
-  diamond: '◆',
-  square: '■',
-  triangle: '▲',
-}
-
-/**
- * A filled `shape` of radius `r` at `(cx, cy)`; `ring` paints a 2px ring of
- * that colour around it, so it reads apart from a line it sits on.
- */
-function marker(shape       , cx        , cy        , r        , fill        , ring         , extra = '')         {
-  const paint = `fill="${fill}"` + (ring === undefined ? '' : ` stroke="${ring}" stroke-width="4" paint-order="stroke"`) + extra
-  switch (shape) {
-    case 'circle':
-      return `<circle cx="${num(cx)}" cy="${num(cy)}" r="${num(r)}" ${paint}/>`
-    case 'square': {
-      const s = r * 0.9
-      return `<rect x="${num(cx - s)}" y="${num(cy - s)}" width="${num(2 * s)}" height="${num(2 * s)}" rx="1" ${paint}/>`
-    }
-    case 'diamond': {
-      const d = r * 1.25
-      return `<path d="M${num(cx)} ${num(cy - d)}L${num(cx + d)} ${num(cy)}L${num(cx)} ${num(cy + d)}L${num(cx - d)} ${num(cy)}Z" ${paint}/>`
-    }
-    case 'triangle': {
-      const t = r * 1.2
-      return `<path d="M${num(cx)} ${num(cy - t)}L${num(cx + t)} ${num(cy + t * 0.8)}L${num(cx - t)} ${num(cy + t * 0.8)}Z" stroke-linejoin="round" ${paint}/>`
-    }
-  }
-}
-
-// ---- src/legend.ts
-// Swatches with labels: inside another picture, as a picture of its own, or
-// as a twin line.
-
-const ROW = 18
-const SWATCH = 14
-const LABEL_SIZE = 11
-
-function swatch(item            , x        , cy        , theme       )         {
-  const mark = item.mark ?? 'line'
-  const color = item.color ?? theme.ink2
-  if (mark === 'line') {
-    return `<path d="M${num(x)} ${num(cy)}H${num(x + SWATCH)}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`
-  }
-  if (typeof mark === 'object') return iconMark(mark.icon, x + SWATCH / 2, cy, 5.5, theme)
-  return marker(mark, x + SWATCH / 2, cy, 4, color)
-}
-
-function glyph(item            )         {
-  const mark = item.mark ?? 'line'
-  if (mark === 'line') return '─'
-  return typeof mark === 'object' ? ICONS[mark.icon].glyph : SHAPE_GLYPH[mark]
-}
-
-/**
- * The legend as a fragment laid out from `(x, y)` (the top left), wrapping at
- * `maxWidth`; with the height it took.
- */
-function legendMarkup(
-  items                       ,
-  x        ,
-  y        ,
-  maxWidth        ,
-  theme       ,
-)                                     {
-  let cx = x
-  let row = 0
-  const parts           = []
-  for (const item of items) {
-    const w = SWATCH + 5 + textWidth(item.label, LABEL_SIZE)
-    if (cx > x && cx + w > x + maxWidth) {
-      cx = x
-      row += 1
-    }
-    const cy = y + row * ROW + ROW / 2
-    parts.push(swatch(item, cx, cy, theme), text(cx + SWATCH + 5, cy + 4, item.label, { size: LABEL_SIZE, fill: theme.ink2 }))
-    cx += w + 14
-  }
-  return { markup: `<g class="legend">${parts.join('')}</g>`, height: items.length === 0 ? 0 : (row + 1) * ROW }
-}
-
-/** The legend's twin: `─ requests  ◆ deploy  ■ incident`. */
-function legendTwin(items                       )         {
-  return items.map(item => `${glyph(item)} ${item.label}`).join('  ')
-}
-
-/** A legend as a picture of its own. */
-function legend(items                       , options                = {})          {
-  const theme = pickTheme(options.theme)
-  const width = options.width ?? 240
-  const pad = 6
-  const { markup, height } = legendMarkup(items, pad, pad, width - 2 * pad, theme)
-  return {
-    svg: svgDoc({
-      width,
-      height: height + 2 * pad,
-      background: options.background === false ? undefined : theme.surface,
-      body: markup,
-    }),
-    alt: `Legend: ${items.map(i => i.label).join(', ')}`,
-    twin: legendTwin(items),
-    isInteractive: false,
-  }
-}
-
-// ---- src/meter.ts
-// A horizontal track with a fill coloured by zone and an optional tick.
-
-const METER_PAD = 6
-const METER_TRACK = 8
-
-/** The zone a value falls in: the first whose `upTo` it does not pass, else the last. */
-function zoneOf(value        , zones                 )                   {
-  return zones.find(z => value <= z.upTo) ?? zones[zones.length - 1]
-}
-
-function meter(data           , options               = {})          {
-  const theme = pickTheme(options.theme)
-  const fmt = options.format ?? abbreviate
-  const width = options.width ?? 240
-  const showText = options.showText ?? true
-  const min = finite(data.min)
-  const max = finite(data.max, min + 1)
-  const value = finite(data.value, min)
-  const status = data.zones && data.zones.length > 0 ? zoneOf(value, data.zones)?.status : data.status
-  const word = status === undefined ? undefined : (data.statusWord ?? STATUS_WORD[status])
-  const fill = status === undefined ? theme.series.blue : theme.status[status]
-
-  const x0 = METER_PAD
-  const trackW = width - 2 * METER_PAD
-  const at = scale(min, max, 0, trackW)
-  const top = showText ? 22 : METER_PAD + 3
-  const height = top + METER_TRACK + METER_PAD + 3
-  const parts           = []
-
-  if (showText) {
-    if (data.label !== undefined) parts.push(text(x0, 14, data.label, { size: 11, fill: theme.ink2 }))
-    const figures = `${fmt(value)} / ${fmt(max)}${word === undefined ? '' : ` · ${word}`}`
-    parts.push(text(x0 + trackW, 14, figures, { size: 11, fill: theme.ink, anchor: 'end', cls: 'meter-figures' }))
-  }
-  parts.push(
-    `<rect class="meter-track" x="${num(x0)}" y="${num(top)}" width="${num(trackW)}" height="${METER_TRACK}" rx="4" fill="${theme.grid}"/>`,
-  )
-  const fillW = at(value)
-  if (fillW > 0) {
-    parts.push(
-      `<rect class="meter-fill" x="${num(x0)}" y="${num(top)}" width="${num(fillW)}" height="${METER_TRACK}" rx="4" fill="${fill}"/>`,
-    )
-  }
-  if (data.tick !== undefined && Number.isFinite(data.tick)) {
-    const tx = x0 + at(data.tick)
-    const d = `M${num(tx)} ${num(top - 3)}V${num(top + METER_TRACK + 3)}`
-    parts.push(
-      `<path d="${d}" stroke="${theme.surface}" stroke-width="6" stroke-linecap="round"/>`,
-      `<path class="meter-tick" d="${d}" stroke="${theme.ink2}" stroke-width="2" stroke-linecap="round"/>`,
-    )
-  }
-
-  const name = data.label ?? 'Meter'
-  const alt = `${name}: ${fmt(value)} of ${fmt(max)}${word === undefined ? '' : `, ${word}`}` +
-    (data.tick === undefined ? '' : `; mark at ${fmt(data.tick)}`)
-  const svg = svgDoc({
-    width,
-    height,
-    title: alt,
-    background: options.background === false ? undefined : theme.surface,
-    body: parts.join(''),
-  })
-  const lead = data.label === undefined ? '' : `${data.label} `
-  return {
-    svg: assertBudget(svg),
-    alt,
-    twin: `${lead}${bar(value, max, { min, tick: data.tick })} ${fmt(value)} / ${fmt(max)}${word === undefined ? '' : ` ${word}`}`,
-    isInteractive: false,
-  }
-}
-
 // ---- src/readSvg.ts
 // Reads the markup the components write and paints the same shapes on a dot
 // canvas: rects, circles, ellipses, lines and paths (with arcs and curves),
@@ -2081,6 +1615,7 @@ function rasterGrid(picture                  , options                = {})     
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
+/** Bytes as padded base64: a Raster's `cells`, an Image's `rgba`. */
 function toBase64(bytes            )         {
   let out = ''
   for (let i = 0; i < bytes.length; i += 3) {
@@ -2092,6 +1627,7 @@ function toBase64(bytes            )         {
   return out
 }
 
+/** Padded or bare base64 back as bytes. */
 function fromBase64(text        )             {
   const clean = text.replace(/=+$/, '')
   const bytes = new Uint8Array(Math.floor((clean.length * 3) / 4))
@@ -2172,6 +1708,675 @@ function toRaster(picture                  , options                            
   const grid = rasterGrid(picture, options)
   const cells              = { columns: grid.columns, rows: grid.rows, cells: encodeCells(grid) }
   return options.key === undefined ? cells : { key: options.key, ...cells }
+}
+
+// ---- src/pixels.ts
+// The pixel branch: a picture as RGBA pixels over a box of terminal cells, for
+// a terminal that draws pictures (Claude Code's `Image`, a kitty escape). The
+// same painter as the Raster's, at more dots a cell; the labels are not set,
+// since the library carries no font.
+
+/** Straight (not premultiplied) RGBA, four bytes a pixel, row by row. */
+
+/** The pixels and the box of cells they fill. */
+
+/** Pixels across a cell by default: twice a common cell's 8, so the picture stays sharp on a dense screen. */
+const CELL_PIXELS = 16
+
+/** What an `Image` takes: a box of 1 to 255 cells a side, 2048 pixels a side, 2 MiB of bytes (and so does a whole tree of Images). */
+const PIXELS_MAX = { cells: 255, side: 2048, bytes: 2 * 1024 * 1024 }
+
+/**
+ * A picture (or a whole `<svg>`) as pixels over whole cells, a cell twice as
+ * tall as it is wide, as the Raster's are: the box keeps the picture's shape,
+ * and the pixels past the picture's edge are clear.
+ */
+function toPixels(picture                  , options               = {})               {
+  const svg = typeof picture === 'string' ? picture : picture.svg
+  const root = /^<svg\b[^>]*>/.exec(svg)?.[0] ?? ''
+  const width = Number(/\swidth="([\d.]+)"/.exec(root)?.[1] ?? CELL_PX)
+  const height = Number(/\sheight="([\d.]+)"/.exec(root)?.[1] ?? 2 * CELL_PX)
+  const columns = clamp(Math.round(options.columns ?? Math.ceil(width / CELL_PX)), 1, PIXELS_MAX.cells)
+  // A cell's width in CSS pixels: a tall picture widens it to fit the most rows.
+  const cellCss = Math.max(width / columns, height / (2 * PIXELS_MAX.cells))
+  const rows = clamp(Math.ceil(height / (2 * cellCss) - 1e-6), 1, PIXELS_MAX.cells)
+  const fit = Math.min(
+    options.cellPixels ?? CELL_PIXELS,
+    PIXELS_MAX.side / columns,
+    PIXELS_MAX.side / (2 * rows),
+    Math.sqrt(Math.min(options.maxBytes ?? PIXELS_MAX.bytes, PIXELS_MAX.bytes) / (4 * 2 * columns * rows)),
+  )
+  const px = Math.max(1, Math.floor(fit))
+  const out               = { width: columns * px, height: rows * 2 * px, data: new Uint8Array(columns * px * rows * 2 * px * 4), columns, rows }
+  const painted = readSvg(svg, px / cellCss).dots
+  const w = Math.min(out.width, painted.width)
+  const h = Math.min(out.height, painted.height)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * painted.width + x) * 4
+      const a = painted.data[i + 3] 
+      if (a <= 0) continue
+      const o = (y * out.width + x) * 4
+      // The canvas is premultiplied; the bytes are not.
+      for (let c = 0; c < 3; c++) out.data[o + c] = Math.round(clamp(painted.data[i + c]  / a, 0, 255))
+      out.data[o + 3] = Math.round(clamp(a, 0, 1) * 255)
+    }
+  }
+  return out
+}
+
+// ---- src/kitty.ts
+// The kitty graphics protocol, for a program that writes to the terminal
+// itself: pixels sent as raw RGBA in the escape, so no PNG encoder is needed.
+// kitty, Ghostty and WezTerm read it.
+
+/** The most base64 one command may carry. */
+const KITTY_CHUNK = 4096
+
+const command = (keys        , payload = '') => `\x1b_G${keys}${payload ? `;${payload}` : ''}\x1b\\`
+
+/**
+ * Pixels shown at the cursor over their box of cells, the cursor after them.
+ * With an `id`, sending that id again deletes the earlier picture and its
+ * placements, and shows the new one at the cursor.
+ * `q=2`: the terminal answers nothing, so nothing lands in the program's input.
+ */
+function kittyImage(pixels              , options                  = {})         {
+  const id = options.id === undefined ? '' : `,i=${options.id}`
+  const keys = `a=T,f=32,s=${pixels.width},v=${pixels.height},c=${pixels.columns},r=${pixels.rows}${id},q=2`
+  const payload = toBase64(pixels.data)
+  if (payload.length <= KITTY_CHUNK) return command(keys, payload)
+  // Every chunk but the last says more follow (m=1); only the first carries the keys.
+  let out = ''
+  for (let at = 0; at < payload.length; at += KITTY_CHUNK) {
+    const more = at + KITTY_CHUNK < payload.length ? 1 : 0
+    out += command(at === 0 ? `${keys},m=1` : `m=${more},q=2`, payload.slice(at, at + KITTY_CHUNK))
+  }
+  return out
+}
+
+/** Deletes the image `id` and frees its data. */
+function kittyDelete(id        )         {
+  return command(`a=d,d=I,i=${id},q=2`)
+}
+
+// ---- src/drivers.ts
+// Drivers: one way each of showing a picture in a terminal, and a ranked list
+// that picks the best one the terminal can draw. `claudeCode` holds an `Image`
+// of pixels and a `Raster` of cells, for a mod; `printDrivers` holds a kitty
+// escape and ANSI cells, for a program that writes to the terminal itself. A
+// driver for another terminal or another host is one more entry, `add`ed.
+
+/** The environment the drivers judge the terminal by: what `$.env.get` gives a mod. */
+
+/** The variables the drivers here read; a mod asks `$.env.get` for each. */
+const TERMINAL_ENV = ['TERM', 'TERM_PROGRAM', 'KITTY_WINDOW_ID', 'TMUX', 'SVG_PANEL_DRIVER']         
+
+/** What every driver's options carry: the environment, and a driver to use whatever it says. */
+
+/** A ranked list of drivers. Keep one that supports every terminal in it, lowest, so a picture always shows. */
+function drivers                                    (...list                        )                        {
+  const ranked = [...list].sort((a, b) => b.rank - a.rank)
+  const byId = (id        ) => ranked.find(d => d.id === id)
+  const pick = (env             , prefer         ) => {
+    const named = byId(prefer ?? '') ?? byId(env.SVG_PANEL_DRIVER ?? '')
+    const driver = named ?? ranked.find(d => d.supports(env))
+    if (!driver) throw new Error(`svg-panel: no driver in [${ranked.map(d => d.id).join(', ')}] draws in this terminal`)
+    return driver
+  }
+  return {
+    list: ranked,
+    add(driver) {
+      if (byId(driver.id)) throw new Error(`svg-panel: a driver named ${driver.id} is already in the list`)
+      return drivers(...ranked, driver)
+    },
+    byId,
+    pick,
+    draw: (picture, options) => pick(options.env, options.prefer).draw(picture, options),
+  }
+}
+
+/** An `Image`'s props: RGBA pixels over a box of cells. */
+
+/** What a Claude Code terminal shows: the element to draw and its props, ready to spread. */
+
+/**
+ * Pixels through Claude Code's `Image`, which draws them in kitty and Ghostty
+ * (and in iTerm2 3.5 and later under fullscreen rendering, which the
+ * environment does not tell: `prefer: 'image'` there). Never inside tmux,
+ * where an Image draws only its alt.
+ */
+const imageDriver                                    = {
+  id: 'image',
+  rank: 10,
+  supports: env =>
+    env.TMUX === undefined &&
+    (env.TERM === 'xterm-kitty' || env.TERM === 'xterm-ghostty' || env.KITTY_WINDOW_ID !== undefined || env.TERM_PROGRAM === 'ghostty'),
+  draw(picture, options) {
+    const pixels = toPixels(picture, options)
+    const alt = options.alt ?? (typeof picture === 'string' ? '' : picture.alt)
+    return {
+      element: 'Image',
+      props: {
+        key: options.key,
+        source: { rgba: toBase64(pixels.data), width: pixels.width, height: pixels.height },
+        columns: pixels.columns,
+        rows: pixels.rows,
+        alt: alt || ' ',
+      },
+    }
+  },
+}
+
+/** Cells through Claude Code's `Raster`: blocks, braille and letters, in every terminal. */
+const rasterDriver                                    = {
+  id: 'raster',
+  rank: 0,
+  supports: () => true,
+  draw: (picture, options) => ({ element: 'Raster', props: toRaster(picture, options) }),
+}
+
+/** The drivers for a Claude Code mod's terminal surface. */
+const claudeCode = drivers(imageDriver, rasterDriver)
+
+/**
+ * A picture for a Claude Code terminal: an Image where the terminal draws
+ * pixels, a Raster elsewhere.
+ * `const v = terminalView(p, { env, columns: e.props.bodyColumns, key: 'cpu' })`, then
+ * `v.element === 'Image' ? <Image {...v.props} /> : <Raster {...v.props} />`.
+ */
+function terminalView(picture                  , options             )               {
+  return claudeCode.draw(picture, options)
+}
+
+/** kitty pixels on standard output: kitty and Ghostty, outside tmux (which drops the escape unless wrapped). */
+const kittyPrintDriver                               = {
+  id: 'kitty',
+  rank: 10,
+  supports: imageDriver.supports,
+  draw: (picture, options) => kittyImage(toPixels(picture, options)),
+}
+
+/** Coloured block and braille cells on standard output, in any terminal with 24-bit colour. */
+const ansiPrintDriver                               = {
+  id: 'ansi',
+  rank: 0,
+  supports: () => true,
+  draw: (picture, options) => ansi(rasterGrid(picture, options)),
+}
+
+/** The drivers for a program that prints to the terminal itself. */
+const printDrivers = drivers(kittyPrintDriver, ansiPrintDriver)
+
+/** A picture as text to write to standard output: kitty pixels where the terminal draws them, coloured cells elsewhere. */
+function printView(picture                  , options              )         {
+  return printDrivers.draw(picture, options)
+}
+
+// ---- src/gauge.ts
+// A 240° arc over a scale, a threshold tick, the value as the hero figure and
+// a status dot with its word.
+
+const GAUGE_SWEEP = 240
+const GAUGE_SIZE = { width: 232, height: 176 }
+/** The arc's centre and radius in the picture's own pixels. */
+const GAUGE_ARC = { cx: 116, cy: 96, r: 72 }
+
+/** The status a gauge or meter shows when none is given. */
+function statusOf(value        , max        , threshold         )         {
+  if (value >= max) return 'critical'
+  if (threshold !== undefined && value >= threshold) return 'warning'
+  return 'good'
+}
+
+/** The angle (degrees clockwise from twelve) a value sits at on the gauge. */
+function gaugeAngle(value        , min        , max        )         {
+  return scale(min, max, -GAUGE_SWEEP / 2, GAUGE_SWEEP / 2)(value)
+}
+
+function gauge(data           , options               = {})          {
+  const theme = pickTheme(options.theme)
+  const fmt = options.format ?? abbreviate
+  const min = finite(data.min)
+  const max = finite(data.max, min + 1)
+  const value = finite(data.value, min)
+  const status = data.status ?? statusOf(value, max, data.threshold)
+  const word = data.statusWord ?? STATUS_WORD[status]
+  const color = theme.status[status]
+  const { cx, cy, r } = GAUGE_ARC
+  const half = GAUGE_SWEEP / 2
+  const angle = gaugeAngle(value, min, max)
+  const parts           = []
+
+  parts.push(
+    `<path class="gauge-track" d="${arcPath(cx, cy, r, -half, half)}" fill="none" stroke="${theme.grid}" stroke-width="10" stroke-linecap="round"/>`,
+  )
+  if (value > min) {
+    parts.push(
+      `<path class="gauge-value" d="${arcPath(cx, cy, r, -half, angle)}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"/>`,
+    )
+  }
+
+  if (data.threshold !== undefined && Number.isFinite(data.threshold)) {
+    const a = gaugeAngle(data.threshold, min, max)
+    const inner = polar(cx, cy, r - 9, a)
+    const outer = polar(cx, cy, r + 9, a)
+    const d = `M${num(inner.x)} ${num(inner.y)}L${num(outer.x)} ${num(outer.y)}`
+    const at = polar(cx, cy, r + 18, a)
+    const anchor = at.x > cx + 6 ? 'start' : at.x < cx - 6 ? 'end' : 'middle'
+    parts.push(
+      `<path d="${d}" stroke="${theme.surface}" stroke-width="6" stroke-linecap="round"/>`,
+      `<path class="gauge-tick" d="${d}" stroke="${theme.ink2}" stroke-width="2" stroke-linecap="round"/>`,
+      text(at.x, at.y + 4, data.thresholdLabel ?? fmt(data.threshold), { size: 10, fill: theme.muted, anchor }),
+    )
+  }
+
+  const start = polar(cx, cy, r, -half)
+  const end = polar(cx, cy, r, half)
+  parts.push(
+    text(start.x, start.y + 20, fmt(min), { size: 10, fill: theme.muted, anchor: 'middle', cls: 'gauge-min' }),
+    text(end.x, end.y + 20, fmt(max), { size: 10, fill: theme.muted, anchor: 'middle', cls: 'gauge-max' }),
+    text(cx, cy + 6, fmt(value), { size: 30, fill: theme.ink, anchor: 'middle', weight: 600, cls: 'gauge-hero' }),
+    text(cx, cy + 24, `of ${fmt(max)}`, { size: 11, fill: theme.muted, anchor: 'middle' }),
+  )
+
+  const rowWidth = 12 + textWidth(word, 12)
+  const dotX = cx - rowWidth / 2 + 4
+  parts.push(
+    `<circle class="gauge-dot" cx="${num(dotX)}" cy="160" r="4" fill="${color}"/>`,
+    text(dotX + 8, 164, word, { size: 12, fill: theme.ink2, cls: 'gauge-word' }),
+  )
+
+  const name = data.label ?? 'Gauge'
+  const thresholdWords = data.threshold === undefined ? '' : `; threshold ${data.thresholdLabel ?? fmt(data.threshold)}`
+  const alt = `${name}: ${fmt(value)} of ${fmt(max)}, ${word}${thresholdWords}`
+  const svg = svgDoc({
+    ...GAUGE_SIZE,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join(''),
+  })
+  const lead = data.label === undefined ? '' : `${data.label} `
+  return {
+    svg: assertBudget(svg),
+    alt,
+    twin: `${lead}${fmt(value)} / ${fmt(max)} ${bar(value, max, { min, tick: data.threshold })} ${word}`,
+    isInteractive: false,
+  }
+}
+
+// ---- src/heatmap.ts
+// A grid of cells in five steps of one colour, with row and column labels and
+// a `less ■■■■■ more` key; a missing value is a short dash.
+
+const HEAT_STEPS = 5
+/** The twin's shades: a space for a missing value, then one per step, faint to full. */
+const HEAT_SHADES = ' ·░▒▓█'
+
+/** The step (0 to 4) a value falls in on `[lo, hi]`. */
+function heatStep(value        , lo        , hi        )         {
+  if (hi <= lo) return HEAT_STEPS - 1
+  return Math.min(HEAT_STEPS - 1, Math.max(0, Math.floor(((value - lo) / (hi - lo)) * HEAT_STEPS)))
+}
+
+/** `#rgb` or `#rrggbb` as three channels; black when it is neither. */
+function channels(hex        )           {
+  const m = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(hex.trim())
+  const full = m ? (m[1] .length === 3 ? [...m[1] ].map(c => c + c).join('') : m[1] ) : '000000'
+  return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16))
+}
+
+function mix(a        , b        , t        )         {
+  const [x, y] = [channels(a), channels(b)]
+  return `#${x.map((v, i) => Math.round(v + (y[i]  - v) * t).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** The five fills, from faint to full, mixed from the grid colour to `color`. */
+function heatColors(theme       , color        )           {
+  return Array.from({ length: HEAT_STEPS }, (_, k) => mix(theme.grid, color, 0.2 + (0.8 * k) / (HEAT_STEPS - 1)))
+}
+
+function heatmap(data             , options                 = {})          {
+  const theme = pickTheme(options.theme)
+  const fmt = options.format ?? abbreviate
+  const size = options.cell ?? 14
+  const gap = options.gap ?? 2
+  const pitch = size + gap
+  const fills = heatColors(theme, options.color ?? theme.series.blue)
+  const rows = data.values
+  const columns = Math.max(0, ...rows.map(r => r.length))
+  const present = rows.flatMap(r => r.filter((v)              => typeof v === 'number' && Number.isFinite(v)))
+  let lo = Infinity
+  let hi = -Infinity
+  for (const v of present) {
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+  }
+  lo = options.min ?? (present.length ? lo : 0)
+  hi = options.max ?? (present.length ? hi : 1)
+
+  const rowLabels = data.rowLabels ?? []
+  const colLabels = data.colLabels ?? []
+  // The grid starts on a terminal cell's corner (8 by 16 CSS pixels), so on a Raster each cell keeps to its own
+  // columns and rows; the row labels get room for a terminal's letters, which run wider than the Svg's.
+  const labelRoom = (l        ) => Math.max(textWidth(l, 10), [...l].length * 8)
+  const left = Math.ceil((6 + (rowLabels.length ? Math.max(...rowLabels.map(labelRoom)) + 6 : 0)) / 8) * 8
+  const top = Math.ceil((6 + (colLabels.length ? 14 : 0)) / 16) * 16
+  const showKey = options.key ?? true
+  const gridW = columns * pitch - gap
+  const keyW = textWidth('less', 10) + 6 + HEAT_STEPS * pitch + textWidth('more', 10) + 4
+  const width = Math.ceil(left + Math.max(gridW, showKey ? keyW : 0) + 6)
+  const height = Math.ceil(top + rows.length * pitch - gap + (showKey ? 22 : 6))
+  const parts           = []
+
+  // Column labels where they fit: every k-th, so none runs into the next.
+  const stride = Math.max(1, Math.ceil((Math.max(0, ...colLabels.map(l => textWidth(l, 10))) + 4) / pitch))
+  colLabels.forEach((l, c) => {
+    if (c % stride === 0 && c < columns) parts.push(text(left + c * pitch, top - 4, l, { size: 10, fill: theme.muted, cls: 'heat-col' }))
+  })
+  rows.forEach((row, r) => {
+    const y = top + r * pitch
+    if (rowLabels[r] !== undefined) parts.push(text(left - 6, y + size - 2, rowLabels[r] , { size: 10, fill: theme.muted, anchor: 'end', cls: 'heat-row' }))
+    for (let c = 0; c < columns; c++) {
+      const v = row[c]
+      const x = left + c * pitch
+      const ok = typeof v === 'number' && Number.isFinite(v)
+      parts.push(ok
+        ? `<rect class="heat-cell" x="${num(x)}" y="${num(y)}" width="${size}" height="${size}" rx="2" fill="${fills[heatStep(v, lo, hi)]}"/>`
+        : `<rect class="heat-empty" x="${num(x + size / 2 - 3)}" y="${num(y + size / 2 - 1)}" width="6" height="2" rx="1" fill="${theme.muted}"/>`)
+    }
+  })
+  if (showKey) {
+    const ky = top + rows.length * pitch - gap + 8
+    const kx = left + Math.max(gridW, keyW) - keyW
+    parts.push(text(kx, ky + 9, 'less', { size: 10, fill: theme.muted, cls: 'heat-key' }))
+    const sx = kx + textWidth('less', 10) + 6
+    fills.forEach((f, k) => parts.push(`<rect x="${num(sx + k * pitch)}" y="${num(ky)}" width="${size}" height="${size}" rx="2" fill="${f}"/>`))
+    parts.push(text(sx + HEAT_STEPS * pitch + 2, ky + 9, 'more', { size: 10, fill: theme.muted }))
+  }
+
+  // The hottest cell, named by its labels where there are labels.
+  let best                                                 
+  rows.forEach((row, r) => row.forEach((v, c) => {
+    if (typeof v === 'number' && Number.isFinite(v) && (best === undefined || v > best.v)) best = { r, c, v }
+  }))
+  const name = options.label ?? 'Heatmap'
+  const where = best === undefined ? '' : [rowLabels[best.r], colLabels[best.c]].filter(Boolean).join(', ')
+  const alt = present.length === 0
+    ? `${name}: no values yet`
+    : `${name}: ${rows.length} rows by ${columns} columns, low ${fmt(Math.min(...present))}, high ${fmt(best .v)}${where ? ` at ${where}` : ''}`
+  const svg = svgDoc({
+    width,
+    height,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join(''),
+  })
+  // The twin: one shade a cell, a line a row, the rows' labels in front.
+  const pad = Math.max(0, ...rowLabels.map(l => [...l].length))
+  const twin = rows.map((row, r) => {
+    const shades = Array.from({ length: columns }, (_, c) => {
+      const v = row[c]
+      return typeof v === 'number' && Number.isFinite(v) ? HEAT_SHADES[1 + heatStep(v, lo, hi)] : HEAT_SHADES[0]
+    }).join('')
+    return pad === 0 ? shades : `${(rowLabels[r] ?? '').padEnd(pad)} ${shades}`
+  }).join('\n')
+  return { svg: assertBudget(svg), alt, twin, isInteractive: false }
+}
+
+// ---- src/icon.ts
+// The named icon set: each drawn as SVG at any radius, and paired with a
+// one-column glyph and a colour for a `Text` on a `Button` beside the picture.
+
+/** A Claude Code theme key for the glyph's `Text`. */
+
+const ICONS                             = {
+  online: { glyph: '●', label: 'online', textColor: 'success', color: t => t.status.good },
+  idle: { glyph: '◐', label: 'idle', textColor: 'merged', color: t => t.series.violet },
+  offline: { glyph: '○', label: 'offline', textColor: 'subtle', color: t => t.muted },
+  rising: { glyph: '▲', label: 'rising', textColor: 'suggestion', color: t => t.series.blue },
+  falling: { glyph: '▼', label: 'falling', textColor: 'claude', color: t => t.series.orange },
+  alert: { glyph: '⚑', label: 'alert', textColor: 'warning', color: t => t.status.warning },
+  failed: { glyph: '✕', label: 'failed', textColor: 'error', color: t => t.status.critical },
+}
+
+const ICON_NAMES = Object.keys(ICONS)              
+
+/** The icon's shape as an SVG fragment of radius `r` centred on `(cx, cy)`. */
+function iconMark(name          , cx        , cy        , r        , theme       )         {
+  const color = ICONS[name].color(theme)
+  const sw = num(Math.max(1.5, r / 4.5))
+  const stroke = `fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"`
+  const p = (dx        , dy        ) => `${num(cx + dx * r)} ${num(cy + dy * r)}`
+  const circle = (k        , paint        ) => `<circle cx="${num(cx)}" cy="${num(cy)}" r="${num(r * k)}" ${paint}/>`
+  switch (name) {
+    case 'online':
+      return `<g class="icon-online">${circle(0.7, `fill="${color}"`)}</g>`
+    case 'idle':
+      return (
+        `<g class="icon-idle"><path d="M${p(0, -0.7)}A${num(0.7 * r)} ${num(0.7 * r)} 0 0 0 ${p(0, 0.7)}Z" fill="${color}"/>` +
+        `${circle(0.7, stroke)}</g>`
+      )
+    case 'offline':
+      return `<g class="icon-offline">${circle(0.7, stroke)}</g>`
+    case 'rising':
+      return `<path class="icon-rising" d="M${p(0, -0.75)}L${p(0.8, 0.6)}L${p(-0.8, 0.6)}Z" fill="${color}" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round"/>`
+    case 'falling':
+      return `<path class="icon-falling" d="M${p(0, 0.75)}L${p(0.8, -0.6)}L${p(-0.8, -0.6)}Z" fill="${color}" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round"/>`
+    case 'alert':
+      return (
+        `<g class="icon-alert"><path d="M${p(-0.5, 0.85)}L${p(-0.5, -0.85)}" ${stroke}/>` +
+        `<path d="M${p(-0.5, -0.85)}L${p(0.75, -0.45)}L${p(-0.5, -0.05)}Z" fill="${color}" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round"/></g>`
+      )
+    case 'failed':
+      return `<path class="icon-failed" d="M${p(-0.6, -0.6)}L${p(0.6, 0.6)}M${p(0.6, -0.6)}L${p(-0.6, 0.6)}" ${stroke}/>`
+  }
+}
+
+/** One icon as a picture; its twin is the glyph. */
+function icon(name          , options              = {})              {
+  const theme = pickTheme(options.theme)
+  const spec = ICONS[name]
+  const r = Math.max(2, options.r ?? 8)
+  const size = 2 * r + 4
+  const label = options.label ?? spec.label
+  const svg = svgDoc({
+    width: size,
+    height: size,
+    background: options.background ? theme.surface : undefined,
+    body: `<g><title>${esc(label)}</title>${iconMark(name, size / 2, size / 2, r, theme)}</g>`,
+  })
+  return {
+    svg,
+    alt: label,
+    twin: spec.glyph,
+    isInteractive: false,
+    glyph: spec.glyph,
+    color: spec.color(theme),
+    textColor: spec.textColor,
+  }
+}
+
+// ---- src/marks.ts
+// Marker shapes for points and legend swatches, each with a surface ring.
+
+/** The one-column glyph that stands for each shape in a twin. */
+const SHAPE_GLYPH                        = {
+  circle: '●',
+  diamond: '◆',
+  square: '■',
+  triangle: '▲',
+}
+
+/**
+ * A filled `shape` of radius `r` at `(cx, cy)`; `ring` paints a 2px ring of
+ * that colour around it, so it reads apart from a line it sits on.
+ */
+function marker(shape       , cx        , cy        , r        , fill        , ring         , extra = '')         {
+  const paint = `fill="${fill}"` + (ring === undefined ? '' : ` stroke="${ring}" stroke-width="4" paint-order="stroke"`) + extra
+  switch (shape) {
+    case 'circle':
+      return `<circle cx="${num(cx)}" cy="${num(cy)}" r="${num(r)}" ${paint}/>`
+    case 'square': {
+      const s = r * 0.9
+      return `<rect x="${num(cx - s)}" y="${num(cy - s)}" width="${num(2 * s)}" height="${num(2 * s)}" rx="1" ${paint}/>`
+    }
+    case 'diamond': {
+      const d = r * 1.25
+      return `<path d="M${num(cx)} ${num(cy - d)}L${num(cx + d)} ${num(cy)}L${num(cx)} ${num(cy + d)}L${num(cx - d)} ${num(cy)}Z" ${paint}/>`
+    }
+    case 'triangle': {
+      const t = r * 1.2
+      return `<path d="M${num(cx)} ${num(cy - t)}L${num(cx + t)} ${num(cy + t * 0.8)}L${num(cx - t)} ${num(cy + t * 0.8)}Z" stroke-linejoin="round" ${paint}/>`
+    }
+  }
+}
+
+// ---- src/legend.ts
+// Swatches with labels: inside another picture, as a picture of its own, or
+// as a twin line.
+
+const ROW = 18
+const SWATCH = 14
+const LABEL_SIZE = 11
+
+function swatch(item            , x        , cy        , theme       )         {
+  const mark = item.mark ?? 'line'
+  const color = item.color ?? theme.ink2
+  if (mark === 'line') {
+    return `<path d="M${num(x)} ${num(cy)}H${num(x + SWATCH)}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`
+  }
+  if (typeof mark === 'object') return iconMark(mark.icon, x + SWATCH / 2, cy, 5.5, theme)
+  return marker(mark, x + SWATCH / 2, cy, 4, color)
+}
+
+function glyph(item            )         {
+  const mark = item.mark ?? 'line'
+  if (mark === 'line') return '─'
+  return typeof mark === 'object' ? ICONS[mark.icon].glyph : SHAPE_GLYPH[mark]
+}
+
+/**
+ * The legend as a fragment laid out from `(x, y)` (the top left), wrapping at
+ * `maxWidth`; with the height it took.
+ */
+function legendMarkup(
+  items                       ,
+  x        ,
+  y        ,
+  maxWidth        ,
+  theme       ,
+)                                     {
+  let cx = x
+  let row = 0
+  const parts           = []
+  for (const item of items) {
+    const w = SWATCH + 5 + textWidth(item.label, LABEL_SIZE)
+    if (cx > x && cx + w > x + maxWidth) {
+      cx = x
+      row += 1
+    }
+    const cy = y + row * ROW + ROW / 2
+    parts.push(swatch(item, cx, cy, theme), text(cx + SWATCH + 5, cy + 4, item.label, { size: LABEL_SIZE, fill: theme.ink2 }))
+    cx += w + 14
+  }
+  return { markup: `<g class="legend">${parts.join('')}</g>`, height: items.length === 0 ? 0 : (row + 1) * ROW }
+}
+
+/** The legend's twin: `─ requests  ◆ deploy  ■ incident`. */
+function legendTwin(items                       )         {
+  return items.map(item => `${glyph(item)} ${item.label}`).join('  ')
+}
+
+/** A legend as a picture of its own. */
+function legend(items                       , options                = {})          {
+  const theme = pickTheme(options.theme)
+  const width = options.width ?? 240
+  const pad = 6
+  const { markup, height } = legendMarkup(items, pad, pad, width - 2 * pad, theme)
+  return {
+    svg: svgDoc({
+      width,
+      height: height + 2 * pad,
+      background: options.background === false ? undefined : theme.surface,
+      body: markup,
+    }),
+    alt: `Legend: ${items.map(i => i.label).join(', ')}`,
+    twin: legendTwin(items),
+    isInteractive: false,
+  }
+}
+
+// ---- src/meter.ts
+// A horizontal track with a fill coloured by zone and an optional tick.
+
+const METER_PAD = 6
+const METER_TRACK = 8
+
+/** The zone a value falls in: the first whose `upTo` it does not pass, else the last. */
+function zoneOf(value        , zones                 )                   {
+  return zones.find(z => value <= z.upTo) ?? zones[zones.length - 1]
+}
+
+function meter(data           , options               = {})          {
+  const theme = pickTheme(options.theme)
+  const fmt = options.format ?? abbreviate
+  const width = options.width ?? 240
+  const showText = options.showText ?? true
+  const min = finite(data.min)
+  const max = finite(data.max, min + 1)
+  const value = finite(data.value, min)
+  const status = data.zones && data.zones.length > 0 ? zoneOf(value, data.zones)?.status : data.status
+  const word = status === undefined ? undefined : (data.statusWord ?? STATUS_WORD[status])
+  const fill = status === undefined ? theme.series.blue : theme.status[status]
+
+  const x0 = METER_PAD
+  const trackW = width - 2 * METER_PAD
+  const at = scale(min, max, 0, trackW)
+  const top = showText ? 22 : METER_PAD + 3
+  const height = top + METER_TRACK + METER_PAD + 3
+  const parts           = []
+
+  if (showText) {
+    if (data.label !== undefined) parts.push(text(x0, 14, data.label, { size: 11, fill: theme.ink2 }))
+    const figures = `${fmt(value)} / ${fmt(max)}${word === undefined ? '' : ` · ${word}`}`
+    parts.push(text(x0 + trackW, 14, figures, { size: 11, fill: theme.ink, anchor: 'end', cls: 'meter-figures' }))
+  }
+  parts.push(
+    `<rect class="meter-track" x="${num(x0)}" y="${num(top)}" width="${num(trackW)}" height="${METER_TRACK}" rx="4" fill="${theme.grid}"/>`,
+  )
+  const fillW = at(value)
+  if (fillW > 0) {
+    parts.push(
+      `<rect class="meter-fill" x="${num(x0)}" y="${num(top)}" width="${num(fillW)}" height="${METER_TRACK}" rx="4" fill="${fill}"/>`,
+    )
+  }
+  if (data.tick !== undefined && Number.isFinite(data.tick)) {
+    const tx = x0 + at(data.tick)
+    const d = `M${num(tx)} ${num(top - 3)}V${num(top + METER_TRACK + 3)}`
+    parts.push(
+      `<path d="${d}" stroke="${theme.surface}" stroke-width="6" stroke-linecap="round"/>`,
+      `<path class="meter-tick" d="${d}" stroke="${theme.ink2}" stroke-width="2" stroke-linecap="round"/>`,
+    )
+  }
+
+  const name = data.label ?? 'Meter'
+  const alt = `${name}: ${fmt(value)} of ${fmt(max)}${word === undefined ? '' : `, ${word}`}` +
+    (data.tick === undefined ? '' : `; mark at ${fmt(data.tick)}`)
+  const svg = svgDoc({
+    width,
+    height,
+    title: alt,
+    background: options.background === false ? undefined : theme.surface,
+    body: parts.join(''),
+  })
+  const lead = data.label === undefined ? '' : `${data.label} `
+  return {
+    svg: assertBudget(svg),
+    alt,
+    twin: `${lead}${bar(value, max, { min, tick: data.tick })} ${fmt(value)} / ${fmt(max)}${word === undefined ? '' : ` ${word}`}`,
+    isInteractive: false,
+  }
 }
 
 // ---- src/sparkline.ts
@@ -2801,24 +3006,43 @@ function breakdown(state           , theme       )            {
   ]
 }
 
+/** The terminal's pictures, each shown one way: a Raster's props, or a driver's view. */
+
 /** How wide the requests chart is drawn on the terminal, in cells, when the pane has room. */
 const CHART_COLUMNS = 55
 
 /**
- * The scene's pictures as Raster props, for the terminal, which draws no Svg:
- * the same shapes on dots, the labels in letters. `columns` is the pane's
- * body width; the chart narrows to it.
+ * Lays the scene's pictures out for the terminal, each shown by `show` under
+ * its key. `columns` is the pane's body width; the chart narrows to it.
+ */
+function layOut   (scene       , columns        , show                                                      )                   {
+  return {
+    gauges: [show('throughput', scene.throughput), show('latency', scene.latency)],
+    requests: show('requests', scene.requests, Math.max(1, Math.min(CHART_COLUMNS, columns))),
+    tiles: scene.tiles.map((tile, i) => show(`tile-${i}`, tile)),
+    meters: scene.meters.map((m, i) => show(`meter-${i}`, m)),
+    sparkline: show('latency-trend', scene.sparkline),
+    breakdown: scene.breakdown.map((p, i) => show(['host-load', 'traffic-share', 'host-heat', 'host-grid'][i] ?? `breakdown-${i}`, p)),
+  }
+}
+
+/**
+ * The scene's pictures as Raster props, for any terminal, which draws no Svg:
+ * the same shapes on dots, the labels in letters.
  */
 function rasterize(scene       , themeName                  , columns        )                {
-  const cells = (key        , picture         , width         ) => toRaster(picture, { key, theme: themeName, columns: width })
-  return {
-    gauges: [cells('throughput', scene.throughput), cells('latency', scene.latency)],
-    requests: cells('requests', scene.requests, Math.max(1, Math.min(CHART_COLUMNS, columns))),
-    tiles: scene.tiles.map((tile, i) => cells(`tile-${i}`, tile)),
-    meters: scene.meters.map((m, i) => cells(`meter-${i}`, m)),
-    sparkline: cells('latency-trend', scene.sparkline),
-    breakdown: scene.breakdown.map((p, i) => cells(['host-load', 'traffic-share', 'host-heat', 'host-grid'][i] ?? `breakdown-${i}`, p)),
-  }
+  return layOut(scene, columns, (key, picture, width) => toRaster(picture, { key, theme: themeName, columns: width }))
+}
+
+/**
+ * The scene's pictures as the drivers pick for this terminal: Images of pixels
+ * where it draws them (kitty, Ghostty), Rasters elsewhere. The Images of one
+ * pane share its 2 MiB of pixels, a like part each.
+ */
+function terminalScene(scene       , themeName                  , columns        , env             )                              {
+  const count = 4 + scene.tiles.length + scene.meters.length + scene.breakdown.length
+  const maxBytes = Math.floor(PIXELS_MAX.bytes / count)
+  return layOut(scene, columns, (key, picture, width) => terminalView(picture, { key, env, theme: themeName, columns: width, maxBytes }))
 }
 
 ;(function () {

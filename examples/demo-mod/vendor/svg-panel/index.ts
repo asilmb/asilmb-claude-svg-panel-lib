@@ -35,10 +35,12 @@ export {
   DEFAULT_COLOR,
   encodeCells,
   fitCell,
+  fromBase64,
   gridText,
   packRgb,
   RASTER_MAX,
   rasterGrid,
+  toBase64,
   toRaster,
   type Cell,
   type Grid,
@@ -46,3 +48,25 @@ export {
   type RasterOptions,
   type RasterPicture,
 } from './raster.ts'
+export { CELL_PIXELS, PIXELS_MAX, toPixels, type PixelOptions, type PixelPicture, type Pixels } from './pixels.ts'
+export {
+  claudeCode,
+  drivers,
+  ansiPrintDriver,
+  imageDriver,
+  kittyPrintDriver,
+  printDrivers,
+  printView,
+  rasterDriver,
+  TERMINAL_ENV,
+  terminalView,
+  type Driver,
+  type DriverOptions,
+  type Drivers,
+  type ImageProps,
+  type PrintOptions,
+  type TerminalEnv,
+  type TerminalView,
+  type ViewOptions,
+} from './drivers.ts'
+export { KITTY_CHUNK, kittyDelete, kittyImage } from './kitty.ts'
